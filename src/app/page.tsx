@@ -36,7 +36,7 @@ const INITIAL: FormState = {
   title: "MR.",
   firstName: "",
   lastName: "",
-  nationality: "",
+  nationality: "CHINESE",
   dateOfBirth: "",
   placeOfBirth: "",
   passportNo: "",
@@ -81,6 +81,22 @@ export default function Page() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+
+    const dateFields: Array<keyof FormState> = [
+      "dateOfBirth",
+      "passportIssueDate",
+      "passportExpiryDate",
+      "arrivalDate",
+      "appointmentDate",
+    ];
+    for (const f of dateFields) {
+      const v = form[f];
+      if (v && !ddmmyyyyToIso(v)) {
+        setError(`"${f}" must be a valid date in DD/MM/YYYY format.`);
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     if (pdfUrl) {
@@ -93,13 +109,13 @@ export default function Page() {
       firstName: form.firstName,
       lastName: form.lastName,
       nationality: form.nationality,
-      dateOfBirth: form.dateOfBirth || undefined,
+      dateOfBirth: ddmmyyyyToIso(form.dateOfBirth),
       placeOfBirth: form.placeOfBirth || undefined,
       passportNo: form.passportNo,
-      passportIssueDate: form.passportIssueDate || undefined,
-      passportExpiryDate: form.passportExpiryDate || undefined,
+      passportIssueDate: ddmmyyyyToIso(form.passportIssueDate),
+      passportExpiryDate: ddmmyyyyToIso(form.passportExpiryDate),
       passportIssuedAt: form.passportIssuedAt || undefined,
-      arrivalDate: form.arrivalDate || undefined,
+      arrivalDate: ddmmyyyyToIso(form.arrivalDate),
       fromCountry: form.fromCountry || undefined,
       portOfArrival: form.portOfArrival || undefined,
       arrivedBy: form.arrivedBy || undefined,
@@ -111,7 +127,7 @@ export default function Page() {
       province: form.province || undefined,
       postalCode: form.postalCode || undefined,
       phone: form.phone || undefined,
-      appointmentDate: form.appointmentDate || undefined,
+      appointmentDate: ddmmyyyyToIso(form.appointmentDate),
       formLocation: form.formLocation || undefined,
       extensionDays: form.extensionDays ? Number(form.extensionDays) : undefined,
       extensionReason: form.extensionReason || undefined,
@@ -224,11 +240,9 @@ export default function Page() {
             />
           </Field>
           <Field label="Date of Birth">
-            <input
-              type="date"
+            <DateInput
               value={form.dateOfBirth}
-              onChange={(e) => set("dateOfBirth", e.target.value)}
-              className={inputCls}
+              onChange={(v) => set("dateOfBirth", v)}
             />
           </Field>
           <Field label="Place of Birth">
@@ -263,30 +277,24 @@ export default function Page() {
             />
           </Field>
           <Field label="Date of Issue">
-            <input
-              type="date"
+            <DateInput
               value={form.passportIssueDate}
-              onChange={(e) => set("passportIssueDate", e.target.value)}
-              className={inputCls}
+              onChange={(v) => set("passportIssueDate", v)}
             />
           </Field>
           <Field label="Date of Expiry">
-            <input
-              type="date"
+            <DateInput
               value={form.passportExpiryDate}
-              onChange={(e) => set("passportExpiryDate", e.target.value)}
-              className={inputCls}
+              onChange={(v) => set("passportExpiryDate", v)}
             />
           </Field>
         </Section>
 
         <Section title="Arrival in Thailand" subtitle="From the latest entry stamp / TM.6">
           <Field label="Arrival Date">
-            <input
-              type="date"
+            <DateInput
               value={form.arrivalDate}
-              onChange={(e) => set("arrivalDate", e.target.value)}
-              className={inputCls}
+              onChange={(v) => set("arrivalDate", v)}
             />
           </Field>
           <Field label="From (Country)">
@@ -386,11 +394,9 @@ export default function Page() {
 
         <Section title="Extension Request" subtitle="Details for the application">
           <Field label="Form Date (Appointment)">
-            <input
-              type="date"
+            <DateInput
               value={form.appointmentDate}
-              onChange={(e) => set("appointmentDate", e.target.value)}
-              className={inputCls}
+              onChange={(v) => set("appointmentDate", v)}
             />
           </Field>
           <Field label="Form Location">
@@ -490,6 +496,51 @@ export default function Page() {
 
 const inputCls =
   "w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none";
+
+// Auto-format raw digits as DD/MM/YYYY while typing (e.g. "01122024" → "01/12/2024")
+function formatDateMask(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  const dd = digits.slice(0, 2);
+  const mm = digits.slice(2, 4);
+  const yyyy = digits.slice(4, 8);
+  if (digits.length <= 2) return dd;
+  if (digits.length <= 4) return `${dd}/${mm}`;
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+// Convert "DD/MM/YYYY" → "YYYY-MM-DD" for the API. Returns undefined for empty or invalid.
+function ddmmyyyyToIso(s: string): string | undefined {
+  if (!s) return undefined;
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return undefined;
+  const [, dd, mm, yyyy] = m;
+  const day = Number(dd), month = Number(mm), year = Number(yyyy);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return undefined;
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function DateInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={value}
+      onChange={(e) => onChange(formatDateMask(e.target.value))}
+      placeholder="DD/MM/YYYY"
+      maxLength={10}
+      pattern="\d{2}/\d{2}/\d{4}"
+      className={inputCls}
+    />
+  );
+}
 
 function Section({
   title,
