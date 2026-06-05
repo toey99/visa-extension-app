@@ -2,6 +2,12 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { Tm7FormData, Title } from "@/lib/tm7-generator";
+import MrzScanner, { type MrzScanResult } from "@/components/MrzScanner";
+import {
+  icaoToDemonym,
+  yymmddToDdmmyyyy,
+  cleanMrzName,
+} from "@/lib/mrz-helpers";
 
 type FormState = {
   title: Title;
@@ -66,7 +72,50 @@ export default function Page() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>("");
   const [pdfUrl, setPdfUrl] = useState<string>("");
+  const [scanWarning, setScanWarning] = useState<string>("");
   const previewRef = useRef<HTMLDivElement>(null);
+
+  function handleMrzScan(data: MrzScanResult) {
+    const missing: string[] = [];
+
+    const firstName = cleanMrzName(data.firstName);
+    const lastName = cleanMrzName(data.lastName);
+    const nationality = icaoToDemonym(data.nationality);
+    const passportNo = data.documentNumber.replace(/</g, "").toUpperCase();
+    const dob = yymmddToDdmmyyyy(data.birthDate);
+    const expiry = yymmddToDdmmyyyy(data.expirationDate, { futureBias: true });
+
+    if (!firstName) missing.push("first name");
+    if (!lastName) missing.push("last name");
+    if (!passportNo) missing.push("passport number");
+    if (!nationality) missing.push("nationality");
+    if (!dob) missing.push("date of birth");
+    if (!expiry) missing.push("passport expiry");
+
+    setForm((prev) => ({
+      ...prev,
+      title: data.sex === "female" ? "MRS." : "MR.",
+      firstName: firstName || prev.firstName,
+      lastName: lastName || prev.lastName,
+      nationality: nationality || prev.nationality,
+      passportNo: passportNo || prev.passportNo,
+      dateOfBirth: dob || prev.dateOfBirth,
+      passportExpiryDate: expiry || prev.passportExpiryDate,
+    }));
+
+    setError("");
+    if (missing.length > 0) {
+      setScanWarning(
+        `Scanned, but the following fields could not be read and need manual entry: ${missing.join(", ")}.`
+      );
+    } else {
+      setScanWarning("");
+    }
+  }
+
+  function handleMrzError(msg: string) {
+    setScanWarning(msg);
+  }
 
   useEffect(() => {
     return () => {
@@ -195,6 +244,19 @@ export default function Page() {
           Fill in your details below and generate a printable TM.7 packet (5 pages: TM.7, STM.2, STM.9, STM.11).
         </p>
       </header>
+
+      <section className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50/60 p-5">
+        <h2 className="text-sm font-semibold text-indigo-900">Quick fill from passport</h2>
+        <p className="mb-3 text-xs text-indigo-700/80">
+          Upload a clear photo of your passport bio page. We&apos;ll read the MRZ on-device and fill in the form.
+        </p>
+        <MrzScanner onScan={handleMrzScan} onError={handleMrzError} />
+        {scanWarning && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            {scanWarning}
+          </div>
+        )}
+      </section>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <Section title="Personal Information" subtitle="As shown in your passport">
