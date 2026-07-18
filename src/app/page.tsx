@@ -401,6 +401,7 @@ export default function Page() {
             <DateInput
               value={form.arrivalDate}
               onChange={(v) => set("arrivalDate", v)}
+              highlight
             />
           </Field>
           <Field label="From (Country)">
@@ -503,6 +504,7 @@ export default function Page() {
             <DateInput
               value={form.appointmentDate}
               onChange={(v) => set("appointmentDate", v)}
+              highlight
             />
           </Field>
           <Field label="Form Location">
@@ -604,8 +606,11 @@ export default function Page() {
   );
 }
 
-const inputCls =
-  "w-full rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-sm transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none";
+const inputBase =
+  "w-full rounded-lg border px-3.5 py-2.5 text-sm transition-colors focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 focus:outline-none";
+const inputCls = `${inputBase} border-slate-300 bg-white`;
+// Yellow highlight for fields that always require manual entry (no AI/passport auto-fill).
+const inputHighlightCls = `${inputBase} border-yellow-400 bg-yellow-100 font-semibold text-yellow-900 placeholder:font-normal placeholder:text-yellow-700/60`;
 
 // Auto-format raw digits as DD/MM/YYYY while typing (e.g. "01122024" → "01/12/2024")
 function formatDateMask(raw: string): string {
@@ -634,9 +639,11 @@ function ddmmyyyyToIso(s: string): string | undefined {
 function DateInput({
   value,
   onChange,
+  highlight = false,
 }: {
   value: string;
   onChange: (v: string) => void;
+  highlight?: boolean;
 }) {
   return (
     <input
@@ -647,7 +654,7 @@ function DateInput({
       placeholder="DD/MM/YYYY"
       maxLength={10}
       pattern="\d{2}/\d{2}/\d{4}"
-      className={inputCls}
+      className={highlight ? inputHighlightCls : inputCls}
     />
   );
 }
