@@ -1,6 +1,7 @@
 "use server";
 
 import { GoogleGenAI, Type } from "@google/genai";
+import { friendlyGeminiMessage, isTransientGeminiError } from "@/lib/geminiError";
 
 export type AiScanResult = {
   title: "MR." | "MRS." | "MISS";
@@ -21,6 +22,13 @@ export type ScanResponse =
 
 const MAX_BYTES = 8 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+const MAX_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1500;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 const PROMPT = `You are reading the bio-data page of an international passport.
 Extract the applicant's details and return them as JSON matching the provided schema.
@@ -60,7 +68,7 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
     const bytes = await file.arrayBuffer();
     const base64 = Buffer.from(bytes).toString("base64");
 
-    const response = await ai.models.generateContent({
+    const request = {
       model: "gemini-2.5-flash",
       contents: [
         {
@@ -113,9 +121,25 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
           ],
         },
       },
-    });
+    };
 
-    const text = response.text;
+    // Retry transient errors (503 overload, 429 rate-limit, 500 server)
+    // with a short delay between tries; fail fast on permanent ones.
+    let text: string | undefined;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        const response = await ai.models.generateContent(request);
+        text = response.text;
+        break;
+      } catch (err) {
+        if (isTransientGeminiError(err) && attempt < MAX_ATTEMPTS) {
+          await sleep(RETRY_DELAY_MS);
+          continue;
+        }
+        throw err;
+      }
+    }
+
     if (!text) {
       return {
         ok: false,
@@ -126,7 +150,8 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
     const parsed = JSON.parse(text) as AiScanResult;
     return { ok: true, data: parsed };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : "Gemini scan failed.";
-    return { ok: false, error: msg };
+    // Log the raw error server-side, surface a clean, classified message.
+    console.error("Gemini passport scan failed:", err);
+    return { ok: false, error: friendlyGeminiMessage(err, "passport") };
   }
 }

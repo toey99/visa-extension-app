@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { Tm7FormData, Title } from "@/lib/tm7-generator";
 import AiPassportScanner, { type AiScanResult } from "@/components/AiPassportScanner";
+import AiTm30Scanner, { type AiTm30ScanResult } from "@/components/AiTm30Scanner";
 
 type FormState = {
   title: Title;
@@ -45,8 +46,8 @@ const INITIAL: FormState = {
   passportExpiryDate: "",
   passportIssuedAt: "",
   arrivalDate: "",
-  fromCountry: "",
-  portOfArrival: "SUVARNABHUMI",
+  fromCountry: "CHINA",
+  portOfArrival: "SUVARNABHUMI AIRPORT",
   arrivedBy: "AIRPLANE",
   visaType: "EXEMPTION (PORPOR 60)",
   houseNo: "",
@@ -68,6 +69,8 @@ export default function Page() {
   const [error, setError] = useState<string>("");
   const [pdfUrl, setPdfUrl] = useState<string>("");
   const [scanWarning, setScanWarning] = useState<string>("");
+  const [tm30Message, setTm30Message] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [tm30File, setTm30File] = useState<File | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
   function handleAiScan(data: AiScanResult) {
@@ -103,6 +106,39 @@ export default function Page() {
 
   function handleScanError(msg: string) {
     setScanWarning(msg);
+  }
+
+  function handleTm30Scan(data: AiTm30ScanResult, file: File) {
+    setTm30File(file);
+    const missing: string[] = [];
+    if (!data.houseNo) missing.push("house no.");
+    if (!data.road) missing.push("road / street");
+    if (!data.subDistrict) missing.push("sub-district");
+    if (!data.district) missing.push("district");
+    if (!data.province) missing.push("province");
+    if (!data.postalCode) missing.push("postal code");
+
+    setForm((prev) => ({
+      ...prev,
+      houseNo: data.houseNo || prev.houseNo,
+      road: data.road || prev.road,
+      subDistrict: data.subDistrict || prev.subDistrict,
+      district: data.district || prev.district,
+      province: data.province || prev.province,
+      postalCode: data.postalCode || prev.postalCode,
+    }));
+
+    setTm30Message({
+      type: missing.length > 0 ? "error" : "success",
+      text:
+        missing.length > 0
+          ? `Address partially filled from TM.30. Please enter manually: ${missing.join(", ")}.`
+          : "Address fields filled from TM.30. It will be attached as the final page of your packet.",
+    });
+  }
+
+  function handleTm30Error(msg: string) {
+    setTm30Message({ type: "error", text: msg });
   }
 
   useEffect(() => {
@@ -171,10 +207,13 @@ export default function Page() {
     };
 
     try {
+      const body = new FormData();
+      body.append("payload", JSON.stringify(payload));
+      if (tm30File) body.append("tm30", tm30File);
+
       const res = await fetch("/api/generate-tm7", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body,
       });
 
       if (!res.ok) {
@@ -219,6 +258,9 @@ export default function Page() {
     setPdfUrl("");
     setForm(INITIAL);
     setError("");
+    setScanWarning("");
+    setTm30Message(null);
+    setTm30File(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -234,14 +276,28 @@ export default function Page() {
       </header>
 
       <section className="mb-6 rounded-2xl border border-violet-200 bg-violet-50/60 p-5">
-        <h2 className="text-sm font-semibold text-violet-900">Quick fill from passport</h2>
-        <p className="mb-3 text-xs text-violet-700/80">
-          Upload a clear photo of your passport bio page. Gemini will extract the fields and fill the form for you.
+        <h2 className="text-sm font-semibold text-violet-900">Quick fill with AI</h2>
+        <p className="mb-4 text-xs text-violet-700/80">
+          Upload a passport bio page or TM.30 PDF. Gemini extracts the details and fills the form for you.
         </p>
-        <AiPassportScanner onScan={handleAiScan} onError={handleScanError} />
+        <div className="space-y-4">
+          <AiPassportScanner onScan={handleAiScan} onError={handleScanError} />
+          <AiTm30Scanner onScan={handleTm30Scan} onError={handleTm30Error} />
+        </div>
         {scanWarning && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {scanWarning}
+          </div>
+        )}
+        {tm30Message && (
+          <div
+            className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+              tm30Message.type === "success"
+                ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                : "border-amber-300 bg-amber-50 text-amber-800"
+            }`}
+          >
+            {tm30Message.text}
           </div>
         )}
       </section>
@@ -514,7 +570,11 @@ export default function Page() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h2 className="text-xl font-semibold text-slate-900">Preview</h2>
-              <p className="text-sm text-slate-500">5 pages: TM.7, STM.2, STM.9, STM.11</p>
+              <p className="text-sm text-slate-500">
+                {tm30File
+                  ? "6 pages: TM.7, STM.2, STM.9, STM.11, TM.30"
+                  : "5 pages: TM.7, STM.2, STM.9, STM.11"}
+              </p>
             </div>
             <div className="flex gap-2">
               <button

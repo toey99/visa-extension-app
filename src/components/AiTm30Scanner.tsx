@@ -1,44 +1,38 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { scanPassport, type AiScanResult } from "@/app/actions/scanPassport";
+import { scanTm30, type AiTm30ScanResult } from "@/app/actions/scanTm30";
 
-export type { AiScanResult };
+export type { AiTm30ScanResult };
 
-export default function AiPassportScanner({
+export default function AiTm30Scanner({
   onScan,
   onError,
 }: {
-  onScan: (data: AiScanResult) => void;
+  onScan: (data: AiTm30ScanResult, file: File) => void;
   onError: (msg: string) => void;
 }) {
   const [scanning, setScanning] = useState(false);
-  const [stage, setStage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
     setScanning(true);
-    setStage("Uploading image...");
 
     try {
       const fd = new FormData();
-      fd.append("image", file);
+      fd.append("document", file);
 
-      setStage("Analyzing with AI...");
-      const result = await scanPassport(fd);
+      const result = await scanTm30(fd);
 
       if (result.ok) {
-        onScan(result.data);
+        onScan(result.data, file);
       } else {
         onError(result.error);
       }
     } catch {
-      // Network failure or an unexpected server-action crash — keep the
-      // alert user-friendly instead of leaking a raw error/JSON string.
       onError("The AI service is currently busy. Please try again in a moment.");
     } finally {
       setScanning(false);
-      setStage("");
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -48,8 +42,7 @@ export default function AiPassportScanner({
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
-        capture="environment"
+        accept="application/pdf,.pdf"
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
@@ -60,7 +53,7 @@ export default function AiPassportScanner({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={scanning}
-        className="inline-flex items-center gap-2 rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-300"
+        className="inline-flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-teal-300"
       >
         {scanning ? (
           <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -76,15 +69,15 @@ export default function AiPassportScanner({
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
-              d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456ZM16.894 20.567 16.5 21.75l-.394-1.183a2.25 2.25 0 0 0-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 0 0 1.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 0 0 1.423 1.423l1.183.394-1.183.394a2.25 2.25 0 0 0-1.423 1.423Z"
+              d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"
             />
           </svg>
         )}
-        {scanning ? stage : "Scan with AI"}
+        {scanning ? "Extracting address from TM.30..." : "Scan TM.30 with AI"}
       </button>
       {!scanning && (
         <p className="text-xs text-slate-500">
-          Photo of the passport bio page — Gemini extracts the fields directly.
+          PDF of your TM.30 receipt — extracts your Thailand address in English.
         </p>
       )}
     </div>
