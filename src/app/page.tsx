@@ -304,7 +304,7 @@ export default function Page() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <Section title="Personal Information" subtitle="As shown in your passport">
-          <Field label="Title" required>
+          <Field label="Title" thai="คำนำหน้า" required>
             <select
               value={form.title}
               onChange={(e) => set("title", e.target.value as Title)}
@@ -315,7 +315,7 @@ export default function Page() {
               <option value="MISS">Miss</option>
             </select>
           </Field>
-          <Field label="First Name" required>
+          <Field label="First Name" thai="ชื่อ" required>
             <input
               type="text"
               required
@@ -325,7 +325,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Last Name" required>
+          <Field label="Last Name" thai="นามสกุล" required>
             <input
               type="text"
               required
@@ -335,7 +335,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Nationality" required>
+          <Field label="Nationality" thai="สัญชาติ" required>
             <input
               type="text"
               required
@@ -345,13 +345,13 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Date of Birth">
+          <Field label="Date of Birth" thai="วันเกิด">
             <DateInput
               value={form.dateOfBirth}
               onChange={(v) => set("dateOfBirth", v)}
             />
           </Field>
-          <Field label="Place of Birth">
+          <Field label="Place of Birth" thai="สถานที่เกิด">
             <input
               type="text"
               value={form.placeOfBirth}
@@ -363,7 +363,7 @@ export default function Page() {
         </Section>
 
         <Section title="Passport" subtitle="From the bio page">
-          <Field label="Passport Number" required>
+          <Field label="Passport Number" thai="หมายเลขหนังสือเดินทาง" required>
             <input
               type="text"
               required
@@ -373,7 +373,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Issued At (country)">
+          <Field label="Issued At (country)" thai="ออกให้ที่ (ประเทศ)">
             <input
               type="text"
               value={form.passportIssuedAt}
@@ -382,13 +382,13 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Date of Issue">
+          <Field label="Date of Issue" thai="วันที่ออก">
             <DateInput
               value={form.passportIssueDate}
               onChange={(v) => set("passportIssueDate", v)}
             />
           </Field>
-          <Field label="Date of Expiry">
+          <Field label="Date of Expiry" thai="วันหมดอายุ">
             <DateInput
               value={form.passportExpiryDate}
               onChange={(v) => set("passportExpiryDate", v)}
@@ -397,14 +397,14 @@ export default function Page() {
         </Section>
 
         <Section title="Arrival in Thailand" subtitle="From the latest entry stamp / TM.6">
-          <Field label="Arrival Date">
+          <Field label="Arrival Date" thai="วันที่เดินทางเข้า">
             <DateInput
               value={form.arrivalDate}
               onChange={(v) => set("arrivalDate", v)}
               highlight
             />
           </Field>
-          <Field label="From (Country)">
+          <Field label="From (Country)" thai="เดินทางมาจาก (ประเทศ)">
             <input
               type="text"
               value={form.fromCountry}
@@ -413,7 +413,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Port of Arrival">
+          <Field label="Port of Arrival" thai="ด่านที่เดินทางเข้า">
             <input
               type="text"
               value={form.portOfArrival}
@@ -421,7 +421,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Arrived By">
+          <Field label="Arrived By" thai="เดินทางโดย">
             <input
               type="text"
               value={form.arrivedBy}
@@ -429,7 +429,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Type of Visa" full>
+          <Field label="Type of Visa" thai="ประเภทวีซ่า" full>
             <input
               type="text"
               value={form.visaType}
@@ -440,7 +440,7 @@ export default function Page() {
         </Section>
 
         <Section title="Address in Thailand" subtitle="Where you are currently staying">
-          <Field label="House No.">
+          <Field label="House No." thai="บ้านเลขที่">
             <input
               type="text"
               value={form.houseNo}
@@ -448,7 +448,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Road / Street">
+          <Field label="Road / Street" thai="ถนน">
             <input
               type="text"
               value={form.road}
@@ -456,7 +456,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Sub-District (Tambol)">
+          <Field label="Sub-District (Tambol)" thai="ตำบล / แขวง">
             <input
               type="text"
               value={form.subDistrict}
@@ -464,7 +464,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="District (Amphur)">
+          <Field label="District (Amphur)" thai="อำเภอ / เขต">
             <input
               type="text"
               value={form.district}
@@ -472,7 +472,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Province">
+          <Field label="Province" thai="จังหวัด">
             <input
               type="text"
               value={form.province}
@@ -480,7 +480,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Postal Code">
+          <Field label="Postal Code" thai="รหัสไปรษณีย์">
             <input
               type="text"
               value={form.postalCode}
@@ -488,7 +488,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Phone" full>
+          <Field label="Phone" thai="เบอร์โทรศัพท์" full>
             <input
               type="tel"
               value={form.phone}
@@ -500,14 +500,14 @@ export default function Page() {
         </Section>
 
         <Section title="Extension Request" subtitle="Details for the application">
-          <Field label="Form Date (Appointment)">
+          <Field label="Form Date (Appointment)" thai="วันที่ยื่นคำร้อง (นัดหมาย)">
             <DateInput
               value={form.appointmentDate}
               onChange={(v) => set("appointmentDate", v)}
               highlight
             />
           </Field>
-          <Field label="Form Location">
+          <Field label="Form Location" thai="สถานที่ยื่นคำร้อง">
             <input
               type="text"
               value={form.formLocation}
@@ -515,7 +515,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Extension Days">
+          <Field label="Extension Days" thai="จำนวนวันที่ขอต่อ">
             <input
               type="number"
               min={1}
@@ -525,7 +525,7 @@ export default function Page() {
               className={inputCls}
             />
           </Field>
-          <Field label="Reason for Extension">
+          <Field label="Reason for Extension" thai="เหตุผลในการขอต่อ">
             <input
               type="text"
               value={form.extensionReason}
@@ -681,11 +681,13 @@ function Section({
 
 function Field({
   label,
+  thai,
   required,
   full,
   children,
 }: {
   label: string;
+  thai?: string;
   required?: boolean;
   full?: boolean;
   children: React.ReactNode;
@@ -695,6 +697,7 @@ function Field({
       <label className="mb-1.5 block text-sm font-medium text-slate-700">
         {label}
         {required && <span className="ml-0.5 text-red-500">*</span>}
+        {thai && <span className="ml-1.5 text-xs font-normal text-green-600">{thai}</span>}
       </label>
       {children}
     </div>
