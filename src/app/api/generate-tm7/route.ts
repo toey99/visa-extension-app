@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateTm7Pdf, type Tm7FormData } from "@/lib/tm7-generator";
+import { buildTm7Filename } from "@/lib/tm7-filename";
 
 export const runtime = "nodejs";
 
@@ -30,14 +31,18 @@ export async function POST(req: NextRequest) {
     }
 
     const pdfBytes = await generateTm7Pdf(data, tm30Bytes);
-    const safePassport = data.passportNo.replace(/[^A-Za-z0-9_-]/g, "");
-    const filename = `TM7-${safePassport || "form"}.pdf`;
+    const filename = buildTm7Filename(data.lastName, data.firstName);
+    // Provide both a plain `filename` (for older/legacy agents) and an
+    // RFC 5987 `filename*` so spaces and any non-ASCII survive on
+    // Android/iOS browsers that would otherwise strip them.
+    const asciiFallback = filename.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+    const encoded = encodeURIComponent(filename);
 
     return new NextResponse(Buffer.from(pdfBytes), {
       status: 200,
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="${filename}"`,
+        "Content-Disposition": `inline; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`,
         "Cache-Control": "no-store",
       },
     });

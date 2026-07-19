@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { Tm7FormData, Title } from "@/lib/tm7-generator";
+import { buildTm7Filename } from "@/lib/tm7-filename";
 import AiPassportScanner, { type AiScanResult } from "@/components/AiPassportScanner";
 import AiTm30Scanner, { type AiTm30ScanResult } from "@/components/AiTm30Scanner";
 
@@ -239,7 +240,7 @@ export default function Page() {
     if (!pdfUrl) return;
     const a = document.createElement("a");
     a.href = pdfUrl;
-    a.download = `TM7-${form.passportNo || "form"}.pdf`;
+    a.download = buildTm7Filename(form.lastName, form.firstName);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
