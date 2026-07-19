@@ -5,6 +5,56 @@ import { scanPassport, type AiScanResult } from "@/app/actions/scanPassport";
 
 export type { AiScanResult };
 
+// Cap the longest edge so a 50/200 MP phone photo (Samsung S24 Ultra etc.)
+// is re-encoded to a modest JPEG the server will accept. This also normalizes
+// odd source formats/empty MIME types coming from mobile gallery pickers to a
+// plain image/jpeg. Gemini reads the bio page fine at this resolution.
+const MAX_EDGE = 2000;
+const JPEG_QUALITY = 0.85;
+
+async function downscaleToJpeg(file: File): Promise<File> {
+  // Decode via createImageBitmap (handles EXIF orientation on modern browsers);
+  // fall back to an <img> element if the browser can't decode this source.
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error("decode failed"));
+        el.src = url;
+      });
+      bitmap = await createImageBitmap(img);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  const { width, height } = bitmap;
+  const scale = Math.min(1, MAX_EDGE / Math.max(width, height));
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("no 2d context");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", JPEG_QUALITY),
+  );
+  if (!blob) throw new Error("toBlob failed");
+
+  const name = file.name.replace(/\.[^.]+$/, "") || "passport";
+  return new File([blob], `${name}.jpg`, { type: "image/jpeg" });
+}
+
 export default function AiPassportScanner({
   onScan,
   onError,
@@ -18,11 +68,20 @@ export default function AiPassportScanner({
 
   async function handleFile(file: File) {
     setScanning(true);
-    setStage("Uploading image...");
+    setStage("Preparing image...");
 
     try {
+      // Re-encode client-side so large/odd mobile photos become a clean,
+      // small JPEG. If anything goes wrong, fall back to the original file.
+      let upload = file;
+      try {
+        upload = await downscaleToJpeg(file);
+      } catch {
+        upload = file;
+      }
+
       const fd = new FormData();
-      fd.append("image", file);
+      fd.append("image", upload);
 
       setStage("Analyzing with AI...");
       const result = await scanPassport(fd);

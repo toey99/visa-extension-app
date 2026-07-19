@@ -30,6 +30,46 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function logScanEvent(phase: string, details?: Record<string, unknown>) {
+  if (details) {
+    console.log(`[scanPassport] ${phase}`, details);
+  } else {
+    console.log(`[scanPassport] ${phase}`);
+  }
+}
+
+// Sniff the image type from the first bytes so an empty or unexpected MIME
+// (common from mobile gallery pickers, e.g. Samsung) doesn't hard-fail before
+// Gemini ever sees the photo. Returns a canonical MIME or null if unrecognized.
+function sniffImageMime(bytes: Uint8Array): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return "image/jpeg";
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  ) {
+    return "image/png";
+  }
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && // R
+    bytes[1] === 0x49 && // I
+    bytes[2] === 0x46 && // F
+    bytes[3] === 0x46 && // F
+    bytes[8] === 0x57 && // W
+    bytes[9] === 0x45 && // E
+    bytes[10] === 0x42 && // B
+    bytes[11] === 0x50 // P
+  ) {
+    return "image/webp";
+  }
+  return null;
+}
+
 const PROMPT = `You are reading the bio-data page of an international passport.
 Extract the applicant's details and return them as JSON matching the provided schema.
 
@@ -53,19 +93,44 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
 
   const file = formData.get("image");
   if (!(file instanceof File)) {
+    logScanEvent("invalid upload", { reason: "field 'image' missing or not a File" });
     return { ok: false, error: "No image was provided." };
   }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return { ok: false, error: "File must be a JPEG, PNG, or WebP image." };
-  }
+
+  logScanEvent("upload metadata", {
+    fileName: file.name,
+    mimeType: file.type || "(empty)",
+    sizeBytes: file.size,
+  });
+
   if (file.size > MAX_BYTES) {
     const mb = (file.size / 1024 / 1024).toFixed(1);
+    logScanEvent("rejected: too large", { sizeBytes: file.size });
     return { ok: false, error: `Image is ${mb} MB; please upload under 8 MB.` };
   }
 
   try {
     const ai = new GoogleGenAI({ apiKey });
     const bytes = await file.arrayBuffer();
+    const byteView = new Uint8Array(bytes);
+
+    // Trust the declared MIME when it's one we allow; otherwise sniff the bytes
+    // so an empty/odd MIME from a mobile picker still goes through.
+    const sniffed = sniffImageMime(byteView);
+    const mimeType = ALLOWED_TYPES.includes(file.type) ? file.type : sniffed;
+    if (!mimeType) {
+      logScanEvent("rejected: unrecognized image", {
+        declaredMime: file.type || "(empty)",
+        firstBytes: Array.from(byteView.slice(0, 8)),
+      });
+      return { ok: false, error: "File must be a JPEG, PNG, or WebP image." };
+    }
+    logScanEvent("resolved image type", {
+      declaredMime: file.type || "(empty)",
+      sniffedMime: sniffed ?? "(none)",
+      usingMime: mimeType,
+    });
+
     const base64 = Buffer.from(bytes).toString("base64");
 
     const request = {
@@ -74,7 +139,7 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
         {
           role: "user",
           parts: [
-            { inlineData: { mimeType: file.type, data: base64 } },
+            { inlineData: { mimeType, data: base64 } },
             { text: PROMPT },
           ],
         },
@@ -128,10 +193,16 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
     let text: string | undefined;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
+        logScanEvent("generateContent attempt", { attempt, maxAttempts: MAX_ATTEMPTS });
         const response = await ai.models.generateContent(request);
         text = response.text;
+        logScanEvent("generateContent success", {
+          attempt,
+          responseLength: text?.length ?? 0,
+        });
         break;
       } catch (err) {
+        logScanEvent("generateContent attempt failed", { attempt });
         if (isTransientGeminiError(err) && attempt < MAX_ATTEMPTS) {
           await sleep(RETRY_DELAY_MS);
           continue;
@@ -141,6 +212,7 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
     }
 
     if (!text) {
+      logScanEvent("empty response");
       return {
         ok: false,
         error: "The AI returned an empty response. Try a clearer photo of the bio page.",
@@ -151,7 +223,7 @@ export async function scanPassport(formData: FormData): Promise<ScanResponse> {
     return { ok: true, data: parsed };
   } catch (err) {
     // Log the raw error server-side, surface a clean, classified message.
-    console.error("Gemini passport scan failed:", err);
+    console.error("[scanPassport] scan failed:", err);
     return { ok: false, error: friendlyGeminiMessage(err, "passport") };
   }
 }
