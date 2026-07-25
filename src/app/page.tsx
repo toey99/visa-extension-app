@@ -72,7 +72,15 @@ export default function Page() {
   const [scanWarning, setScanWarning] = useState<string>("");
   const [tm30Message, setTm30Message] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [tm30File, setTm30File] = useState<File | null>(null);
+  // Android Chrome has no built-in inline PDF viewer, so a blob PDF inside an
+  // <iframe> renders blank. Detect it and show a download/open card instead.
+  // (Desktop + iOS Safari render inline PDFs fine, so they keep the iframe.)
+  const [isAndroid, setIsAndroid] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setIsAndroid(/Android/i.test(navigator.userAgent));
+  }, []);
 
   function handleAiScan(data: AiScanResult) {
     const missing: string[] = [];
@@ -580,12 +588,15 @@ export default function Page() {
               </p>
             </div>
             <div className="flex gap-2">
-              <button
-                onClick={handlePrint}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Print
-              </button>
+              {/* Print via window.open(blob).print() doesn't work on Android — hide it there. */}
+              {!isAndroid && (
+                <button
+                  onClick={handlePrint}
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Print
+                </button>
+              )}
               <button
                 onClick={handleDownload}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
@@ -594,13 +605,56 @@ export default function Page() {
               </button>
             </div>
           </div>
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <iframe
-              src={pdfUrl}
-              className="h-[80vh] w-full"
-              title="Generated TM.7 PDF"
-            />
-          </div>
+          {isAndroid ? (
+            // Android has no inline PDF viewer — offer clear open/download actions
+            // instead of a blank iframe.
+            <div className="rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+              <svg
+                className="mx-auto h-10 w-10 text-emerald-600"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"
+                />
+              </svg>
+              <p className="mt-3 text-sm font-medium text-slate-900">
+                PDF ของคุณพร้อมแล้ว
+              </p>
+              <p className="mx-auto mt-1 max-w-sm text-xs text-slate-500">
+                เบราว์เซอร์บน Android ไม่รองรับการแสดง PDF ในหน้าเว็บโดยตรง
+                กดปุ่มด้านล่างเพื่อเปิดหรือบันทึกไฟล์
+              </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <a
+                  href={pdfUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  เปิด PDF ในแท็บใหม่
+                </a>
+                <button
+                  onClick={handleDownload}
+                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700"
+                >
+                  ดาวน์โหลด PDF
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <iframe
+                src={pdfUrl}
+                className="h-[80vh] w-full"
+                title="Generated TM.7 PDF"
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
