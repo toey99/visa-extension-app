@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { scanTm30, type AiTm30ScanResult } from "@/app/actions/scanTm30";
+import { compressPdf } from "@/lib/compressPdf";
 
 export type { AiTm30ScanResult };
 
@@ -18,31 +19,45 @@ export default function AiTm30Scanner({
   onError: (msg: string) => void;
 }) {
   const [scanning, setScanning] = useState(false);
+  const [stage, setStage] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
-    // Reject oversized PDFs up front with an accurate message. Without this the
-    // Server Action rejects the request before running (the body-size limit),
-    // and the generic catch below would show a misleading "AI busy" error.
-    if (file.size > MAX_PDF_BYTES) {
-      const mb = (file.size / 1024 / 1024).toFixed(1);
-      onError(
-        `This PDF is ${mb} MB, which is too large to scan (max 4 MB). Please upload a smaller TM.30 PDF, or fill the address in manually.`,
-      );
-      if (inputRef.current) inputRef.current.value = "";
-      return;
-    }
-
     setScanning(true);
+    setStage("Reading PDF...");
 
     try {
+      // Oversized PDFs (usually a full-page scan) would be rejected by the
+      // Server Action's body-size limit before it ever runs. Rasterize + JPEG
+      // re-compress client-side to squeeze them under the limit first.
+      let upload = file;
+      if (file.size > MAX_PDF_BYTES) {
+        setStage("Compressing large PDF...");
+        try {
+          upload = await compressPdf(file);
+        } catch {
+          upload = file; // fall through to the guard below
+        }
+
+        if (upload.size > MAX_PDF_BYTES) {
+          const mb = (upload.size / 1024 / 1024).toFixed(1);
+          onError(
+            `This PDF is still ${mb} MB after compression (max 4 MB). Please upload a smaller TM.30 PDF, or fill the address in manually.`,
+          );
+          return;
+        }
+      }
+
+      setStage("Extracting address from TM.30...");
       const fd = new FormData();
-      fd.append("document", file);
+      fd.append("document", upload);
 
       const result = await scanTm30(fd);
 
       if (result.ok) {
-        onScan(result.data, file);
+        // Attach the (possibly compressed) file that actually uploaded — the
+        // original may be too large for the packet-generation upload too.
+        onScan(result.data, upload);
       } else {
         onError(result.error);
       }
@@ -54,6 +69,7 @@ export default function AiTm30Scanner({
       );
     } finally {
       setScanning(false);
+      setStage("");
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -94,7 +110,7 @@ export default function AiTm30Scanner({
             />
           </svg>
         )}
-        {scanning ? "Extracting address from TM.30..." : "Scan TM.30 with AI"}
+        {scanning ? stage || "Scanning..." : "Scan TM.30 with AI"}
       </button>
       {!scanning && (
         <p className="text-xs text-slate-500">
