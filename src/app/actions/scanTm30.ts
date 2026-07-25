@@ -20,7 +20,11 @@ export type Tm30ScanResponse =
   | { ok: true; data: AiTm30ScanResult }
   | { ok: false; error: string };
 
-const MAX_BYTES = 10 * 1024 * 1024;
+// Server Actions cap the request body at serverActions.bodySizeLimit (4.5MB in
+// next.config.ts), and Vercel caps serverless request bodies at ~4.5MB too, so a
+// 10MB PDF could never actually reach this action. Keep this in sync with the
+// client-side guard in AiTm30Scanner.tsx.
+const MAX_BYTES = 4 * 1024 * 1024;
 const PDF_MIME = "application/pdf";
 const MODEL = "gemini-2.5-flash";
 

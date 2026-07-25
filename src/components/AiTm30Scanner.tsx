@@ -5,6 +5,11 @@ import { scanTm30, type AiTm30ScanResult } from "@/app/actions/scanTm30";
 
 export type { AiTm30ScanResult };
 
+// Keep in sync with serverActions.bodySizeLimit (4.5MB) in next.config.ts and the
+// ~4.5MB Vercel serverless request-body ceiling. We guard a bit under the limit
+// to leave room for multipart/form-data overhead.
+const MAX_PDF_BYTES = 4 * 1024 * 1024;
+
 export default function AiTm30Scanner({
   onScan,
   onError,
@@ -16,6 +21,18 @@ export default function AiTm30Scanner({
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function handleFile(file: File) {
+    // Reject oversized PDFs up front with an accurate message. Without this the
+    // Server Action rejects the request before running (the body-size limit),
+    // and the generic catch below would show a misleading "AI busy" error.
+    if (file.size > MAX_PDF_BYTES) {
+      const mb = (file.size / 1024 / 1024).toFixed(1);
+      onError(
+        `This PDF is ${mb} MB, which is too large to scan (max 4 MB). Please upload a smaller TM.30 PDF, or fill the address in manually.`,
+      );
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+
     setScanning(true);
 
     try {
@@ -30,7 +47,11 @@ export default function AiTm30Scanner({
         onError(result.error);
       }
     } catch {
-      onError("The AI service is currently busy. Please try again in a moment.");
+      // The Server Action itself threw (network drop, or the body-size limit was
+      // exceeded) — keep the message honest rather than blaming the AI service.
+      onError(
+        "Couldn't upload the TM.30 PDF. Check your connection and try again, or fill the address in manually.",
+      );
     } finally {
       setScanning(false);
       if (inputRef.current) inputRef.current.value = "";
