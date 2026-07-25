@@ -20,18 +20,15 @@ export type Tm30ScanResponse =
   | { ok: true; data: AiTm30ScanResult }
   | { ok: false; error: string };
 
-// Server Actions cap the request body at serverActions.bodySizeLimit (4.5MB in
-// next.config.ts), and Vercel caps serverless request bodies at ~4.5MB too, so a
-// 10MB PDF could never actually reach this action. Keep this in sync with the
-// client-side guard in AiTm30Scanner.tsx.
+// Keep in sync with serverActions.bodySizeLimit (4.5MB in next.config.ts), the
+// ~4.5MB Vercel request-body ceiling, and the client-side guard in
+// AiTm30Scanner.tsx. Larger scans are compressed client-side before upload.
 const MAX_BYTES = 4 * 1024 * 1024;
 const PDF_MIME = "application/pdf";
 const MODEL = "gemini-2.5-flash";
 
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
-const FILE_ACTIVE_TIMEOUT_MS = 30_000;
-const FILE_POLL_INTERVAL_MS = 1000;
 
 const PROMPT = `Analyze this Thai TM.30 Receipt of Notification PDF. Extract the resident's address in Thailand. Return EXCLUSIVELY a JSON object with these fields: { houseNo, road, subDistrict, district, province, postalCode }.
 
@@ -105,82 +102,6 @@ function isPdfUpload(file: File, bytes: Uint8Array): boolean {
   return hasPdfMagicBytes(bytes);
 }
 
-async function waitForActiveFile(ai: GoogleGenAI, fileName: string) {
-  const deadline = Date.now() + FILE_ACTIVE_TIMEOUT_MS;
-
-  while (Date.now() < deadline) {
-    const file = await ai.files.get({ name: fileName });
-    logScanEvent("poll file state", {
-      name: file.name,
-      state: file.state,
-      uri: file.uri,
-      mimeType: file.mimeType,
-      sizeBytes: file.sizeBytes,
-      error: file.error,
-    });
-
-    if (file.state === "ACTIVE") return file;
-    if (file.state === "FAILED") {
-      throw new Error(
-        `Gemini file processing failed: ${JSON.stringify(file.error ?? { state: file.state })}`,
-      );
-    }
-
-    await sleep(FILE_POLL_INTERVAL_MS);
-  }
-
-  throw new Error(`Timed out waiting for Gemini file to become ACTIVE: ${fileName}`);
-}
-
-async function uploadPdfToGemini(ai: GoogleGenAI, file: File, bytes: ArrayBuffer) {
-  const blob = new Blob([bytes], { type: PDF_MIME });
-
-  logScanEvent("uploading PDF to Gemini Files API", {
-    fileName: file.name,
-    clientMimeType: file.type || "(empty)",
-    sizeBytes: file.size,
-  });
-
-  const uploaded = await ai.files.upload({
-    file: blob,
-    config: {
-      mimeType: PDF_MIME,
-      displayName: file.name || "tm30.pdf",
-    },
-  });
-
-  logScanEvent("upload complete", {
-    name: uploaded.name,
-    uri: uploaded.uri,
-    state: uploaded.state,
-    mimeType: uploaded.mimeType,
-    sizeBytes: uploaded.sizeBytes,
-  });
-
-  if (!uploaded.name) {
-    throw new Error("Gemini file upload returned no resource name.");
-  }
-
-  const readyFile =
-    uploaded.state === "ACTIVE" ? uploaded : await waitForActiveFile(ai, uploaded.name);
-
-  if (!readyFile.uri) {
-    throw new Error("Gemini file is ACTIVE but has no URI.");
-  }
-
-  return readyFile;
-}
-
-async function deleteGeminiFile(ai: GoogleGenAI, fileName: string | undefined) {
-  if (!fileName) return;
-  try {
-    await ai.files.delete({ name: fileName });
-    logScanEvent("deleted uploaded file", { name: fileName });
-  } catch (err) {
-    logScanError("failed to delete uploaded file", err, { name: fileName });
-  }
-}
-
 export async function scanTm30(formData: FormData): Promise<Tm30ScanResponse> {
   logScanEvent("request received");
 
@@ -207,7 +128,7 @@ export async function scanTm30(formData: FormData): Promise<Tm30ScanResponse> {
 
   if (file.size > MAX_BYTES) {
     const mb = (file.size / 1024 / 1024).toFixed(1);
-    return { ok: false, error: `PDF is ${mb} MB; please upload under 10 MB.` };
+    return { ok: false, error: `PDF is ${mb} MB; please upload under 4 MB.` };
   }
 
   const bytes = await file.arrayBuffer();
@@ -229,11 +150,13 @@ export async function scanTm30(formData: FormData): Promise<Tm30ScanResponse> {
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  let uploadedFileName: string | undefined;
 
   try {
-    const geminiFile = await uploadPdfToGemini(ai, file, bytes);
-    uploadedFileName = geminiFile.name;
+    // Send the PDF inline (base64), exactly like the passport scanner. This
+    // avoids the Files API upload + up-to-30s ACTIVE polling round-trip, whose
+    // latency was blowing past the serverless function timeout (surfacing as a
+    // thrown Server Action / "couldn't upload" error, especially on mobile).
+    const base64 = Buffer.from(bytes).toString("base64");
 
     const request = {
       model: MODEL,
@@ -241,12 +164,7 @@ export async function scanTm30(formData: FormData): Promise<Tm30ScanResponse> {
         {
           role: "user",
           parts: [
-            {
-              fileData: {
-                fileUri: geminiFile.uri,
-                mimeType: PDF_MIME,
-              },
-            },
+            { inlineData: { mimeType: PDF_MIME, data: base64 } },
             { text: PROMPT },
           ],
         },
@@ -283,9 +201,9 @@ export async function scanTm30(formData: FormData): Promise<Tm30ScanResponse> {
       },
     };
 
-    logScanEvent("calling Gemini generateContent", {
+    logScanEvent("calling Gemini generateContent (inline PDF)", {
       model: MODEL,
-      fileUri: geminiFile.uri,
+      base64Length: base64.length,
     });
 
     let text: string | undefined;
@@ -339,7 +257,5 @@ export async function scanTm30(formData: FormData): Promise<Tm30ScanResponse> {
     });
 
     return { ok: false, error: friendlyGeminiMessage(err, "TM.30 PDF") };
-  } finally {
-    await deleteGeminiFile(ai, uploadedFileName);
   }
 }
