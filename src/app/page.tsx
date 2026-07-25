@@ -293,6 +293,10 @@ export default function Page() {
           <AiPassportScanner onScan={handleAiScan} onError={handleScanError} />
           <AiTm30Scanner onScan={handleTm30Scan} onError={handleTm30Error} />
         </div>
+        <p className="mt-3 text-xs text-violet-700/70">
+          A scan not working, or a button not responding? Refresh the page to load the
+          latest version, then try again.
+        </p>
         {scanWarning && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             {scanWarning}
