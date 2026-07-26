@@ -82,6 +82,14 @@ export default function Page() {
     setIsAndroid(/Android/i.test(navigator.userAgent));
   }, []);
 
+  // Default the appointment date to the user's local "today". Done in an effect
+  // (client-only) rather than in initial state so the server's UTC clock can't
+  // disagree with the browser's local date and cause a hydration mismatch near
+  // midnight. The field stays a normal editable input, so users can change it.
+  useEffect(() => {
+    setForm((prev) => (prev.appointmentDate ? prev : { ...prev, appointmentDate: todayDdmmyyyy() }));
+  }, []);
+
   function handleAiScan(data: AiScanResult) {
     const missing: string[] = [];
     if (!data.firstName) missing.push("first name");
@@ -265,7 +273,7 @@ export default function Page() {
   function handleReset() {
     if (pdfUrl) URL.revokeObjectURL(pdfUrl);
     setPdfUrl("");
-    setForm(INITIAL);
+    setForm({ ...INITIAL, appointmentDate: todayDdmmyyyy() });
     setError("");
     setScanWarning("");
     setTm30Message(null);
@@ -670,6 +678,15 @@ const inputBase =
 const inputCls = `${inputBase} border-slate-300 bg-white`;
 // Yellow highlight for fields that always require manual entry (no AI/passport auto-fill).
 const inputHighlightCls = `${inputBase} border-yellow-400 bg-yellow-100 font-semibold text-yellow-900 placeholder:font-normal placeholder:text-yellow-700/60`;
+
+// The user's local date as DD/MM/YYYY — used to prefill the appointment field.
+function todayDdmmyyyy(): string {
+  const d = new Date();
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  return `${dd}/${mm}/${yyyy}`;
+}
 
 // Auto-format raw digits as DD/MM/YYYY while typing (e.g. "01122024" → "01/12/2024")
 function formatDateMask(raw: string): string {
