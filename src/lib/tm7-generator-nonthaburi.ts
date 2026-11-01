@@ -12,6 +12,7 @@
 // =============================================================
 
 import { PDFDocument, PDFPage, rgb } from "pdf-lib";
+import { passportDateFields } from "./tm7-passport-dates";
 import fs from "fs";
 import path from "path";
 
@@ -204,12 +205,6 @@ export async function generateTm7PdfNonthaburi(
   const fmtYear = (d: Date | null) =>
     d ? d.toLocaleDateString("en-GB", { year: "numeric" }) : "";
 
-  const issueDay = issueDateObj ? issueDateObj.getDate().toString() : "";
-  const issMonth = fmtMonthLong(issueDateObj);
-  const issYear = fmtYear(issueDateObj);
-  const expDay = fmtDay(expiryDateObj);
-  const expMonth = fmtMonthLong(expiryDateObj);
-  const expYear = fmtYear(expiryDateObj);
   const arrDay = fmtDay(arrivalDateObj);
   const arrMonth = fmtMonthLong(arrivalDateObj);
   const arrYear = fmtYear(arrivalDateObj);
@@ -311,13 +306,12 @@ export async function generateTm7PdfNonthaburi(
   drawFieldText(page1, "p1.portOfArrival", portOfArrival, { x: 150, y: 332, size: 12, font, color: C });
   drawFieldText(page1, "p1.arrivedBy", arrivedBy, { x: 185, y: 368, size: 12, font, color: C });
 
-  drawFieldText(page1, "p1.issueDay", issueDay, { x: 480, y: 436, size: 12, font, color: C });
-  drawFieldText(page1, "p1.issueMonth", issMonth, { x: 105, y: 436, size: 12, font, color: C });
-  drawFieldText(page1, "p1.issueYear", issYear, { x: 205, y: 436, size: 12, font, color: C });
+  // Passport issue/expiry day-month-year: geometry and value pairing live
+  // in tm7-passport-dates so the two dates cannot be transposed here.
+  for (const f of passportDateFields(issueDateObj, expiryDateObj)) {
+    drawFieldText(page1, f.key, f.value, { x: f.x, y: f.y, size: 12, font, color: C });
+  }
   drawFieldText(page1, "p1.passportIssuedAt", passportIssuedAt, { x: 300, y: 436, size: 12, font, color: C });
-  drawFieldText(page1, "p1.expDay", expDay, { x: 480, y: 478, size: 12, font, color: C });
-  drawFieldText(page1, "p1.expMonth", expMonth, { x: 105, y: 406, size: 12, font, color: C });
-  drawFieldText(page1, "p1.expYear", expYear, { x: 205, y: 406, size: 12, font, color: C });
   drawFieldText(page1, "p1.visaType", visaType, { x: 350, y: 406, size: 12, font, color: C });
   drawFieldText(page1, "p1.fromCountry", fromCountry, { x: 350, y: 368, size: 12, font, color: C });
   drawFieldText(page1, "p1.arrDay", arrDay, { x: 350, y: 332, size: 12, font, color: C });
