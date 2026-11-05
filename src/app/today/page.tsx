@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { analyzeDoc, type AnalyzedDoc } from "@/app/actions/analyzeDoc";
-import { scanTm30 } from "@/app/actions/scanTm30";
+import { analyzeTm30 } from "@/app/actions/analyzeTm30";
 import { compressPdf } from "@/lib/compressPdf";
 import type { Tm7FormData } from "@/lib/tm7-generator";
 import {
@@ -95,7 +95,7 @@ export default function TodayPage() {
     setWorking(true);
 
     // 1) downscale + register every file first (so the user sees them immediately)
-    type Pending = { doc: DocFile; file: File; result?: AnalyzedDoc; address?: Partial<PersonFields> };
+    type Pending = { doc: DocFile; file: File; result?: AnalyzedDoc; address?: Partial<PersonFields>; tm30Who?: { firstName: string; lastName: string; passportNo: string } };
     const pending: Pending[] = [];
     for (const f of files) {
       const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
@@ -125,9 +125,10 @@ export default function TodayPage() {
             if (item.doc.blob.size > MAX_PDF_BYTES) throw new Error("PDF ใหญ่เกิน 4 MB หลังบีบอัด");
             const fd = new FormData();
             fd.append("document", new File([item.doc.blob], item.file.name, { type: "application/pdf" }));
-            const r = await scanTm30(fd);
+            const r = await analyzeTm30(fd);
             if (!r.ok) throw new Error(r.error);
             item.address = r.data;
+            item.tm30Who = { firstName: r.data.firstName, lastName: r.data.lastName, passportNo: r.data.passportNo };
             item.doc.kind = "tm30";
           } else {
             const fd = new FormData();
@@ -165,14 +166,27 @@ export default function TodayPage() {
         touched.set(current.id, current);
         continue;
       }
-      // TM.30 PDFs are usually named after the person — match by name tokens first
+      // TM.30 receipts: match by the passport number printed on the receipt,
+      // then by the name on the receipt, then by the filename; a receipt that
+      // matches nobody becomes its own person (a later passport scan with the
+      // same number merges into it).
       let target: Person | null = null;
       if (item.doc.kind === "tm30") {
-        const tokens = item.file.name.toUpperCase().replace(/\.[^.]+$/, "").split(/[^A-Z]+/).filter((t) => t.length > 1 && t !== "TM");
-        target = existing().find((p) => {
-          const nm = `${p.fields.firstName} ${p.fields.lastName}`.toUpperCase();
-          return tokens.length > 0 && tokens.every((t) => nm.includes(t));
-        }) ?? null;
+        const who = item.tm30Who;
+        if (who?.passportNo) target = existing().find((p) => p.fields.passportNo === who.passportNo) ?? null;
+        const nameTokens = [
+          ...(who ? `${who.firstName} ${who.lastName}` : "").toUpperCase().split(/[^A-Z]+/),
+          ...item.file.name.toUpperCase().replace(/\.[^.]+$/, "").split(/[^A-Z]+/),
+        ].filter((t) => t.length > 1 && t !== "TM" && t !== "PDF");
+        if (!target && nameTokens.length) {
+          target = existing().find((p) => {
+            const own = `${p.fields.firstName} ${p.fields.lastName}`.toUpperCase().split(/[^A-Z]+/).filter(Boolean);
+            return own.length > 0 && own.every((t) => nameTokens.includes(t));
+          }) ?? null;
+        }
+        if (!target) {
+          target = { id: newId(), order: nextOrder() + touched.size, fields: { ...EMPTY_FIELDS, firstName: who?.firstName ?? "", lastName: who?.lastName ?? "", passportNo: who?.passportNo ?? "" }, files: [], createdAt: Date.now() };
+        }
       }
       if (!target) target = current ?? existing().slice(-1)[0] ?? null;
       if (!target) {
