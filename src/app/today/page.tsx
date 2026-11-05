@@ -752,7 +752,7 @@ function PersonCard({
             )}
             <label className="block"><span className="text-slate-500">คำสั่งเพิ่มสำหรับคนนี้ (เช่น เอากระเป๋าออก) แล้วกด "ทำรูปใหม่"</span>
               <input value={p.photoExtra ?? ""} onChange={(e) => onChange({ ...p, photoExtra: e.target.value })} className={inputCls} /></label>
-            {p.aiPhoto && <span className="text-slate-500">ลากรูปเพื่อเลื่อน · สกรอลเพื่อซูม · ดับเบิลคลิกดูรูปเต็ม</span>}
+            {p.aiPhoto && <span className="text-slate-500">ปุ่ม ＋－ ซูม · ลูกศรเลื่อนทีละนิด · หรือลากรูปด้วยเมาส์ · ดับเบิลคลิกดูรูปเต็ม</span>}
           </div>
         </div>
       )}
@@ -818,9 +818,7 @@ function PhotoFrame({ aiPhoto, crop, onCommit }: { aiPhoto: Blob; crop: Crop; on
     if (!c) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      cropRef.current = { ...cropRef.current, zoom: cropRef.current.zoom * (e.deltaY < 0 ? 1.05 : 1 / 1.05) };
-      paint();
-      commitSoon();
+      nudge({ zoom: cropRef.current.zoom * (e.deltaY < 0 ? 1.02 : 1 / 1.02) });
     };
     c.addEventListener("wheel", onWheel, { passive: false });
     return () => c.removeEventListener("wheel", onWheel);
@@ -849,8 +847,20 @@ function PhotoFrame({ aiPhoto, crop, onCommit }: { aiPhoto: Blob; crop: Crop; on
     const photo = await renderPhoto(aiPhoto, cropRef.current);
     onCommit({ ...cropRef.current }, photo);
   }
+  function nudge(patch: Partial<Crop>) {
+    const next = { ...cropRef.current, ...patch };
+    next.zoom = Math.min(3, Math.max(0.5, next.zoom));
+    next.dx = Math.min(1, Math.max(-1, next.dx));
+    next.dy = Math.min(1, Math.max(-1, next.dy));
+    cropRef.current = next;
+    paint();
+    commitSoon();
+  }
+  const STEP = 0.03;
+  const nb = "rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50";
 
   return (
+    <div className="flex flex-col items-center gap-1.5">
     <canvas
       ref={canvasRef}
       width={240}
@@ -867,6 +877,16 @@ function PhotoFrame({ aiPhoto, crop, onCommit }: { aiPhoto: Blob; crop: Crop; on
       onPointerUp={() => { if (dragRef.current) { dragRef.current = null; commit(); } }}
       onDoubleClick={() => { if (fullUrl) window.open(fullUrl, "_blank"); }}
     />
+    <div className="grid grid-cols-3 gap-1">
+      <button type="button" className={nb} onClick={() => nudge({ zoom: cropRef.current.zoom * 1.06 })} title="ซูมเข้า">＋</button>
+      <button type="button" className={nb} onClick={() => nudge({ dy: cropRef.current.dy - STEP })} title="เลื่อนขึ้น">▲</button>
+      <button type="button" className={nb} onClick={() => nudge({ zoom: cropRef.current.zoom / 1.06 })} title="ซูมออก">－</button>
+      <button type="button" className={nb} onClick={() => nudge({ dx: cropRef.current.dx - STEP })} title="เลื่อนซ้าย">◀</button>
+      <button type="button" className={nb} onClick={() => nudge({ dy: cropRef.current.dy + STEP })} title="เลื่อนลง">▼</button>
+      <button type="button" className={nb} onClick={() => nudge({ dx: cropRef.current.dx + STEP })} title="เลื่อนขวา">▶</button>
+    </div>
+    <button type="button" className={nb + " w-full"} onClick={() => nudge({ ...DEFAULT_CROP })}>รีเซ็ต</button>
+    </div>
   );
 
   function commitSoon() {
