@@ -29,6 +29,7 @@ export type AnalyzedDoc = {
   passportIssueDate: string;    // DD/MM/YYYY
   passportExpiryDate: string;   // DD/MM/YYYY
   passportIssuedAt: string;
+  photoBox: string;             // holder's photo on the bio page: "ymin,xmin,ymax,xmax" on a 0-1000 scale
   // entry stamp (latest Thai arrival stamp on the page)
   arrivalDate: string;          // DD/MM/YYYY — red date stamp inside the box
   admittedUntil: string;        // DD/MM/YYYY — blue "admitted until" date
@@ -82,6 +83,7 @@ PASSPORT:
 - "title": "MR." for male; "MRS." for a female (use "MISS" only if clearly unmarried); otherwise "".
 - "chineseName": the holder's name printed in Chinese characters (next to the Latin name on Chinese passports). "" if none.
 - Dates DD/MM/YYYY. "passportNo" is the document number on the bio page (top-right), not the MRZ personal number.
+- "photoBox": bounding box of the holder's printed photo as "ymin,xmin,ymax,xmax" with each value 0-1000 relative to the image size.
 STAMP:
 - Find the MOST RECENT Thai ARRIVAL stamp (red rectangular box). "arrivalDate" = the date inside/under that box, DD/MM/YYYY (dates on stamps are usually DD MMM YYYY like "12 OCT 2026" — convert).
 - "admittedUntil" = the blue (sometimes black) "ADMITTED UNTIL" / "ALLOWED TO STAY UNTIL" date near that stamp, DD/MM/YYYY; "" if absent.
@@ -96,7 +98,7 @@ Return only the JSON object.`;
 const STRING = { type: Type.STRING };
 const FIELDS = [
   "docType", "title", "firstName", "lastName", "chineseName", "nationality", "dateOfBirth", "placeOfBirth",
-  "passportNo", "passportIssueDate", "passportExpiryDate", "passportIssuedAt",
+  "passportNo", "passportIssueDate", "passportExpiryDate", "passportIssuedAt", "photoBox",
   "arrivalDate", "admittedUntil", "portOfArrival", "arrivedBy", "visaType",
   "houseNo", "road", "subDistrict", "district", "province", "postalCode",
 ] as const;

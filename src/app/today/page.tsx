@@ -9,7 +9,7 @@
 // day can then be turned into TM.7 packets, the TM.30 upload Excel and a
 // folder tree zip — all from one screen. State lives in IndexedDB.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
 import { analyzeDoc, type AnalyzedDoc } from "@/app/actions/analyzeDoc";
 import { analyzeTm30 } from "@/app/actions/analyzeTm30";
 import { compressPdf } from "@/lib/compressPdf";
@@ -21,8 +21,25 @@ import {
 } from "@/lib/today/types";
 import { clearAll, deletePerson, loadAll, saveMeta, savePerson } from "@/lib/today/store";
 import {
-  buildDayZip, buildTm30Excel, downloadBlob, downscaleImage, mergePdfs, plusDaysDdmmyyyy,
+  buildDayZip, buildTm30Excel, downloadBlob, downscaleImage, loadScript, mergePdfs, plusDaysDdmmyyyy,
 } from "@/lib/today/clientTools";
+import {
+  DEFAULT_CROP, buildPhotoSheetPdf, cropPassportPhoto, drawCrop, findHeadByBackground, loadImage, renderPhoto,
+  type Crop, type HeadBox,
+} from "@/lib/today/photoTools";
+
+// ---------- photo prompts (editable in the settings panel, kept in localStorage) ----------
+const PROMPT_SELFIE_DEFAULT =
+  "ปรับแสงภาพเดิม ให้เหมือนเป็นภาพถ่ายออกจากสตูดิโอ พื้นหลังสีขาว ด้วยกล้องคุณภาพสูง ภาพคนเดิมนะ ปรับภาพหน้าตรงเหมือนถ่ายรูปไปสมัครงาน ใส่เสื้อผ้าตัวเดิม แต่เพิ่มสัดส่วนของเสื้อผ้าให้มากขึ้นด้วยนะ สุภาพสีเดิม จัดเสื้อให้เรียบร้อยเหมือนรูปติดบัตร ลบกระเป๋าสะพาย สายกระเป๋า หมวก หูฟัง แว่นกันแดด และสิ่งของอื่นออกให้หมด เหลือแต่เสื้อ มุมกล้องหน้าตรง มองกล้อง ห้ามเห็นฟัน พื้นหลังสีขาวล้วนเรียบ ไม่มีเงา ไม่มีลวดลาย ภาพแนวตั้ง ครึ่งตัวบน เห็นหัวถึงไหล่ ตัวอยู่กลางภาพ";
+const PROMPT_PASSPORT_DEFAULT =
+  "แก้ไขรูปภาพ หน้าคนเดิม ขอทรงผม พื้นหลังขาว หน้าตรง นำรูปไปทำวีซ่า ห้ามเห็นฟัน ไม่ใส่แว่นตา ขอเพิ่มสัดส่วนให้มีเสื้อผ้าเยอะขึ้นด้วยนะ {เสื้อผ้า} พื้นหลังสีขาวล้วนเรียบ ไม่มีเงา ภาพแนวตั้ง ครึ่งตัวบน เห็นหัวถึงไหล่ ตัวอยู่กลางภาพ คมชัดเหมือนถ่ายในสตูดิโอ";
+const CLOTHES_DEFAULT = "เสื้อยืดคอโปโลสีกรมท่า\nเสื้อยืดคอกลมสีดำ\nเสื้อยืดคอกลมสีขาว\nเสื้อเชิ้ตคอปกสีดำ\nเสื้อเชิ้ตคอปกสีขาว\nเสื้อยืดคอโปโลสีเทาเข้ม";
+
+type PhotoSettings = { provider: "openai" | "gemini"; model: string; promptSelfie: string; promptPassport: string; clothes: string };
+const PHOTO_SETTINGS_DEFAULT: PhotoSettings = { provider: "openai", model: "gpt-image-1.5", promptSelfie: PROMPT_SELFIE_DEFAULT, promptPassport: PROMPT_PASSPORT_DEFAULT, clothes: CLOTHES_DEFAULT };
+function loadPhotoSettings(): PhotoSettings {
+  try { return { ...PHOTO_SETTINGS_DEFAULT, ...JSON.parse(localStorage.getItem("today-photo-settings") || "{}") }; } catch { return { ...PHOTO_SETTINGS_DEFAULT }; }
+}
 
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
 const CONCURRENCY = 3;
@@ -34,6 +51,10 @@ export default function TodayPage() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [working, setWorking] = useState(false);
+  const [photoSettings, setPhotoSettings] = useState<PhotoSettings>(PHOTO_SETTINGS_DEFAULT);
+  const [showSettings, setShowSettings] = useState(false);
+  const [summaryBlob, setSummaryBlob] = useState<Blob | null>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
   const peopleRef = useRef<Person[]>([]);
   useEffect(() => { peopleRef.current = people; }, [people]);
 
@@ -44,7 +65,16 @@ export default function TodayPage() {
       setMeta({ ...DEFAULT_META, ...(m ?? {}), date: m?.date || todayDdmmyyyy() });
       setLoaded(true);
     });
+    setPhotoSettings(loadPhotoSettings());
   }, []);
+
+  function updatePhotoSettings(patch: Partial<PhotoSettings>) {
+    setPhotoSettings((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem("today-photo-settings", JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }
 
   function updateMeta(patch: Partial<DayMeta>) {
     setMeta((prev) => {
@@ -137,6 +167,7 @@ export default function TodayPage() {
             if (!r.ok) throw new Error(r.error);
             item.result = r.data;
             item.doc.kind = r.data.docType;
+            if (r.data.docType === "passport" && r.data.photoBox) item.doc.photoBox = r.data.photoBox;
             if (r.data.docType === "tm30") item.address = pickAddress(r.data);
           }
           item.doc.status = "done";
@@ -334,6 +365,116 @@ export default function TodayPage() {
     }
   }
 
+  // ---------- photos ----------
+  function clothesList(): string[] {
+    return photoSettings.clothes.split("\n").map((x) => x.trim()).filter(Boolean);
+  }
+
+  async function makePhoto(p: Person): Promise<Person> {
+    const selfie = p.files.find((x) => x.kind === "selfie");
+    const passport = p.files.find((x) => x.kind === "passport");
+    let source: Blob;
+    let mode: "selfie" | "passport";
+    let cloth = p.cloth || "";
+    if (selfie) { source = selfie.blob; mode = "selfie"; }
+    else if (passport) {
+      source = await cropPassportPhoto(passport.blob, passport.photoBox || "");
+      mode = "passport";
+      if (!cloth) { const list = clothesList(); cloth = list[Math.floor(Math.random() * list.length)] || ""; }
+    } else throw new Error("ไม่มีเซลฟี่หรือพาสปอร์ตให้ทำรูป");
+    const base = mode === "selfie" ? photoSettings.promptSelfie : photoSettings.promptPassport.replace("{เสื้อผ้า}", cloth);
+    const prompt = p.photoExtra ? `${base} ${p.photoExtra}` : base;
+    const body = new FormData();
+    body.append("image", new File([source], "in.jpg", { type: "image/jpeg" }));
+    body.append("prompt", prompt);
+    body.append("provider", photoSettings.provider);
+    body.append("model", photoSettings.model);
+    const res = await fetch("/api/make-photo", { method: "POST", body });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(errBody.error || `HTTP ${res.status}`);
+    }
+    const aiPhoto = await res.blob();
+    const photo = await renderPhoto(aiPhoto, DEFAULT_CROP);
+    return { ...p, aiPhoto, photo, crop: { ...DEFAULT_CROP }, photoMode: mode, cloth };
+  }
+
+  async function photoOne(p: Person) {
+    setError("");
+    setStatus(`กำลังทำรูป ${personFolderName(p)}… (20–50 วินาที)`);
+    try {
+      const next = await makePhoto(p);
+      upsertPerson({ ...next, files: peopleRef.current.find((x) => x.id === p.id)?.files ?? next.files });
+      setStatus("");
+    } catch (e) {
+      setError(`${personFolderName(p)}: ${e instanceof Error ? e.message : String(e)}`);
+      setStatus("");
+    }
+  }
+
+  async function photosAll() {
+    const todo = people.filter((p) => !p.photo && p.files.some((x) => x.kind === "selfie" || x.kind === "passport"));
+    if (!todo.length) { setStatus("ทุกคนมีรูปแล้ว"); return; }
+    setWorking(true); setError("");
+    let done = 0;
+    const queue = [...todo];
+    const failures: string[] = [];
+    async function worker() {
+      while (queue.length) {
+        const p = queue.shift()!;
+        try {
+          const next = await makePhoto(p);
+          upsertPerson({ ...next, files: peopleRef.current.find((x) => x.id === p.id)?.files ?? next.files });
+        } catch (e) {
+          failures.push(`${personFolderName(p)}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        done++;
+        setStatus(`ทำรูปแล้ว ${done}/${todo.length}`);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(2, todo.length) }, worker));
+    if (failures.length) setError(failures.join(" · "));
+    setStatus(`ทำรูปเสร็จ ${todo.length - failures.length}/${todo.length} คน`);
+    setWorking(false);
+  }
+
+  function updateCrop(id: string, crop: Crop, photo: Blob) {
+    patchPerson(id, (x) => ({ ...x, crop, photo }));
+  }
+
+  async function photoSheet(): Promise<Blob | null> {
+    const photos = people.filter((p) => p.photo).map((p) => p.photo as Blob);
+    if (!photos.length) return null;
+    return buildPhotoSheetPdf(photos);
+  }
+  async function downloadPhotoSheet() {
+    setError("");
+    try {
+      const blob = await photoSheet();
+      if (!blob) { setError("ยังไม่มีรูปพื้นขาวของใครเลย"); return; }
+      downloadBlob(blob, `photo-sheet_${meta.date.replace(/\//g, "")}.pdf`);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  }
+
+  async function makeSummary(): Promise<Blob | null> {
+    const el = summaryRef.current;
+    if (!el || !people.length) return null;
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js");
+    const h2c = (window as unknown as { html2canvas: (el: HTMLElement, o: Record<string, unknown>) => Promise<HTMLCanvasElement> }).html2canvas;
+    const canvas = await h2c(el, { scale: 2, backgroundColor: "#ffffff", useCORS: true });
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/png"));
+    if (blob) setSummaryBlob(blob);
+    return blob;
+  }
+  async function downloadSummary() {
+    setError("");
+    try {
+      const blob = await makeSummary();
+      if (!blob) return;
+      downloadBlob(blob, `summary_${meta.date.replace(/\//g, "")}_${meta.jobType}.png`);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  }
+
   async function excelTm30() {
     const ready = people.filter((p) => p.fields.firstName && p.fields.passportNo);
     if (!ready.length) { setError("ยังไม่มีคนที่มีชื่อและเลขพาสปอร์ต"); return; }
@@ -349,7 +490,9 @@ export default function TodayPage() {
     if (!people.length) return;
     setWorking(true); setStatus("กำลังสร้าง zip โฟลเดอร์…");
     try {
-      const blob = await buildDayZip(people, meta);
+      const sheet = await photoSheet();
+      const summary = summaryBlob ?? (await makeSummary().catch(() => null));
+      const blob = await buildDayZip(people, meta, { photoSheet: sheet ?? undefined, summary: summary ?? undefined });
       downloadBlob(blob, `${meta.date.replace(/\//g, "")}_${meta.jobType}.zip`);
       setStatus("");
     } catch (e) {
@@ -421,10 +564,42 @@ export default function TodayPage() {
           <button onClick={() => addEmptyPerson()} className={btnCls}>+ เพิ่มคนว่าง</button>
           <button onClick={excelTm30} disabled={working || !people.length} className={btnCls}>⬇ Excel TM30</button>
           <button onClick={tm7All} disabled={working || !people.length} className={btnPrimaryCls}>⬇ TM7 ทุกคน (PDF เดียว)</button>
+          <button onClick={photosAll} disabled={working || !people.length} className={btnPrimaryCls}>✦ ทำรูปพื้นขาวทุกคน</button>
+          <button onClick={downloadPhotoSheet} disabled={working || !people.some((p) => p.photo)} className={btnCls}>⬇ แผ่น A4 รูป (PDF)</button>
+          <button onClick={downloadSummary} disabled={working || !people.length} className={btnCls}>⬇ Summary (PNG)</button>
+          <button onClick={() => setShowSettings((v) => !v)} className={btnCls} title="ตั้งค่ารูป">⚙</button>
           <button onClick={dayZip} disabled={working || !people.length} className={btnCls}>⬇ โฟลเดอร์วันนี้ (zip)</button>
           <button onClick={clearDay} disabled={working} className={btnDangerCls}>ล้างวัน</button>
         </div>
       </div>
+
+      {showSettings && (
+        <div className="mt-3 grid gap-3 rounded-2xl bg-white p-4 text-sm shadow-sm ring-1 ring-slate-200 lg:grid-cols-3">
+          <div className="flex gap-3 lg:col-span-3">
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-500">AI สร้างรูป</span>
+              <select value={photoSettings.provider} onChange={(e) => updatePhotoSettings({ provider: e.target.value as PhotoSettings["provider"] })} className={inputCls}>
+                <option value="openai">OpenAI</option><option value="gemini">Gemini (gemini-2.5-flash-image)</option>
+              </select>
+            </label>
+            {photoSettings.provider === "openai" && (
+              <label className="block">
+                <span className="mb-1 block text-xs text-slate-500">โมเดล</span>
+                <select value={photoSettings.model} onChange={(e) => updatePhotoSettings({ model: e.target.value })} className={inputCls}>
+                  <option>gpt-image-1.5</option><option>gpt-image-2</option><option>chatgpt-image-latest</option><option>gpt-image-1-mini</option>
+                </select>
+              </label>
+            )}
+            <p className="self-end text-xs text-slate-500">ต้องมี OPENAI_API_KEY ใน Vercel (Preview + Production)</p>
+          </div>
+          <label className="block"><span className="mb-1 block text-xs text-slate-500">Prompt กรณีมีเซลฟี่</span>
+            <textarea rows={5} value={photoSettings.promptSelfie} onChange={(e) => updatePhotoSettings({ promptSelfie: e.target.value })} className={inputCls} /></label>
+          <label className="block"><span className="mb-1 block text-xs text-slate-500">Prompt กรณีใช้รูปพาสปอร์ต — {"{เสื้อผ้า}"} จะถูกสุ่มแทน</span>
+            <textarea rows={5} value={photoSettings.promptPassport} onChange={(e) => updatePhotoSettings({ promptPassport: e.target.value })} className={inputCls} /></label>
+          <label className="block"><span className="mb-1 block text-xs text-slate-500">รายการเสื้อผ้า (บรรทัดละแบบ)</span>
+            <textarea rows={5} value={photoSettings.clothes} onChange={(e) => updatePhotoSettings({ clothes: e.target.value })} className={inputCls} /></label>
+        </div>
+      )}
 
       {error && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
@@ -441,10 +616,21 @@ export default function TodayPage() {
             onChange={(next) => upsertPerson(next)}
             onRemove={() => removePerson(p.id)}
             onTm7={() => tm7One(p)}
+            onPhoto={() => photoOne(p)}
+            onCrop={(crop, photo) => updateCrop(p.id, crop, photo)}
+            clothes={clothesList()}
             onMoveFile={(fileId, toId) => moveFile(p.id, fileId, toId)}
             busy={working}
           />
         ))}
+      </div>
+
+      {/* one-page summary (rendered off-screen, exported with html2canvas) */}
+      <div className="mt-8">
+        <h2 className="mb-2 text-sm font-semibold text-slate-700">ตัวอย่าง Summary</h2>
+        <div className="overflow-auto rounded-2xl ring-1 ring-slate-200">
+          <SummarySheet ref={summaryRef} people={people} meta={meta} />
+        </div>
       </div>
     </div>
   );
@@ -457,7 +643,7 @@ export default function TodayPage() {
 const KIND_LABEL: Record<DocType, string> = { passport: "พาสปอร์ต", stamp: "ตราเข้าเมือง", selfie: "เซลฟี่", tm30: "TM30", other: "อื่น ๆ" };
 
 function PersonCard({
-  person: p, people, meta, onChange, onRemove, onTm7, onMoveFile, busy,
+  person: p, people, meta, onChange, onRemove, onTm7, onPhoto, onCrop, clothes, onMoveFile, busy,
 }: {
   person: Person;
   people: Person[];
@@ -465,6 +651,9 @@ function PersonCard({
   onChange: (p: Person) => void;
   onRemove: () => void;
   onTm7: () => void;
+  onPhoto: () => void;
+  onCrop: (crop: Crop, photo: Blob) => void;
+  clothes: string[];
   onMoveFile: (fileId: string, toPersonId: string) => void;
   busy: boolean;
 }) {
@@ -509,6 +698,7 @@ function PersonCard({
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={onTm7} disabled={busy} className={btnCls}>TM7 PDF</button>
+          <button onClick={onPhoto} disabled={busy} className={btnCls}>{p.aiPhoto ? "ทำรูปใหม่" : "✦ ทำรูปพื้นขาว"}</button>
           <button onClick={() => { if (window.confirm("ลบคนนี้?")) onRemove(); }} className={btnDangerCls}>ลบ</button>
         </div>
       </div>
@@ -544,6 +734,28 @@ function PersonCard({
           </div>
         ))}
       </div>
+
+      {/* photo */}
+      {(p.aiPhoto || p.files.some((x) => x.kind === "passport" && !p.files.some((y) => y.kind === "selfie"))) && (
+        <div className="mt-3 flex flex-wrap items-start gap-3 rounded-xl bg-slate-50 p-3">
+          {p.aiPhoto ? (
+            <PhotoFrame aiPhoto={p.aiPhoto} crop={p.crop ?? DEFAULT_CROP} onCommit={onCrop} />
+          ) : (
+            <div className="text-xs text-slate-500">ไม่มีเซลฟี่ → จะครอปหน้าจากพาสปอร์ตแล้วสุ่มเสื้อให้</div>
+          )}
+          <div className="flex min-w-[220px] flex-1 flex-col gap-2 text-xs">
+            {(p.photoMode === "passport" || !p.files.some((x) => x.kind === "selfie")) && (
+              <label className="block"><span className="text-slate-500">เสื้อผ้า (โหมดพาสปอร์ต)</span>
+                <select value={p.cloth ?? ""} onChange={(e) => onChange({ ...p, cloth: e.target.value })} className={inputCls}>
+                  <option value="">สุ่ม</option>{clothes.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select></label>
+            )}
+            <label className="block"><span className="text-slate-500">คำสั่งเพิ่มสำหรับคนนี้ (เช่น เอากระเป๋าออก) แล้วกด "ทำรูปใหม่"</span>
+              <input value={p.photoExtra ?? ""} onChange={(e) => onChange({ ...p, photoExtra: e.target.value })} className={inputCls} /></label>
+            {p.aiPhoto && <span className="text-slate-500">ลากรูปเพื่อเลื่อน · สกรอลเพื่อซูม · ดับเบิลคลิกดูรูปเต็ม</span>}
+          </div>
+        </div>
+      )}
 
       {/* fields */}
       <div className="mt-4 grid gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -589,6 +801,136 @@ function PersonCard({
       </datalist>
     </section>
   );
+}
+
+// Crop preview with drag / wheel; commits a re-rendered print-size JPEG.
+function PhotoFrame({ aiPhoto, crop, onCommit }: { aiPhoto: Blob; crop: Crop; onCommit: (crop: Crop, photo: Blob) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  const faceRef = useRef<HeadBox | null>(null);
+  const cropRef = useRef<Crop>(crop);
+  const dragRef = useRef<{ x: number; y: number; dx: number; dy: number } | null>(null);
+  const [fullUrl, setFullUrl] = useState("");
+
+  useEffect(() => { cropRef.current = crop; }, [crop]);
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      cropRef.current = { ...cropRef.current, zoom: cropRef.current.zoom * (e.deltaY < 0 ? 1.05 : 1 / 1.05) };
+      paint();
+      commitSoon();
+    };
+    c.addEventListener("wheel", onWheel, { passive: false });
+    return () => c.removeEventListener("wheel", onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    loadImage(aiPhoto).then((img) => {
+      if (!alive) return;
+      imgRef.current = img;
+      faceRef.current = findHeadByBackground(img);
+      paint();
+    });
+    const u = URL.createObjectURL(aiPhoto);
+    setFullUrl(u);
+    return () => { alive = false; URL.revokeObjectURL(u); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiPhoto]);
+
+  function paint() {
+    const img = imgRef.current, c = canvasRef.current;
+    if (!img || !c) return;
+    drawCrop(img, faceRef.current, cropRef.current, c, 240, 320);
+  }
+  async function commit() {
+    const photo = await renderPhoto(aiPhoto, cropRef.current);
+    onCommit({ ...cropRef.current }, photo);
+  }
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={240}
+      height={320}
+      className="h-40 w-[120px] cursor-grab rounded border border-slate-300 bg-white"
+      title="ลากเพื่อเลื่อน · สกรอลเพื่อซูม"
+      onPointerDown={(e) => { dragRef.current = { x: e.clientX, y: e.clientY, dx: cropRef.current.dx, dy: cropRef.current.dy }; e.currentTarget.setPointerCapture(e.pointerId); }}
+      onPointerMove={(e) => {
+        const d = dragRef.current; if (!d) return;
+        const rc = e.currentTarget.getBoundingClientRect();
+        cropRef.current = { ...cropRef.current, dx: d.dx - (e.clientX - d.x) / rc.width, dy: d.dy - (e.clientY - d.y) / rc.height };
+        paint();
+      }}
+      onPointerUp={() => { if (dragRef.current) { dragRef.current = null; commit(); } }}
+      onDoubleClick={() => { if (fullUrl) window.open(fullUrl, "_blank"); }}
+    />
+  );
+
+  function commitSoon() {
+    const w = window as unknown as { __todayCommitTimer?: number };
+    if (w.__todayCommitTimer) window.clearTimeout(w.__todayCommitTimer);
+    w.__todayCommitTimer = window.setTimeout(commit, 400);
+  }
+}
+
+// The one-page board the user takes to the counter: photo, EN + CN name,
+// agent + payment tag per person; office and issue date at the bottom.
+const SummarySheet = forwardRef<HTMLDivElement, { people: Person[]; meta: DayMeta }>(function SummarySheet({ people, meta }, ref) {
+  const [dd, mm, yy] = meta.date.split("/");
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const dateEn = dd && mm && yy ? `${dd} ${months[Number(mm) - 1] ?? mm} ${yy}` : meta.date;
+  const dateCn = dd && mm && yy ? `${yy}年 ${Number(mm)}月 ${Number(dd)}日` : "";
+  const collect = people.filter((p) => p.fields.pay === "collect");
+  const sum = collect.reduce((s, p) => s + (Number(p.fields.amount) || 0), 0);
+  return (
+    <div ref={ref} style={{ width: 900, padding: 24, background: "linear-gradient(135deg,#e9ecef,#f8f9fa 40%,#dfe3e8)", fontFamily: "system-ui, 'Noto Sans Thai', 'Noto Sans SC', sans-serif" }}>
+      <div style={{ background: "#fff", borderRadius: 10, padding: 18, minHeight: 360 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(8, 1fr)", gap: "14px 8px" }}>
+          {people.map((p) => {
+            const f = p.fields;
+            const amt = f.amount ? ` ${Number(f.amount).toLocaleString()}` : "";
+            const who = f.agent ? `${f.agent} ` : "";
+            const tag = f.pay === "collect" ? { bg: "#ffe66d", fg: "#4a3b00", t: `${who}เก็บ${amt}`.trim() }
+              : f.pay === "paid" ? { bg: "#cfe9ff", fg: "#0b3d6b", t: `${who}จ่ายแล้ว` } : { bg: "#cfe9ff", fg: "#0b3d6b", t: `${who}ไม่เก็บ` };
+            return (
+              <div key={p.id} style={{ textAlign: "center" }}>
+                <SummaryPhoto person={p} />
+                <div style={{ fontSize: 10, fontWeight: 600, marginTop: 5, color: "#222", letterSpacing: 0.3 }}>{[f.firstName, f.lastName].filter(Boolean).join(" ") || "\u00a0"}</div>
+                <div style={{ fontSize: 15, lineHeight: 1.2 }}>{f.chineseName || "\u00a0"}</div>
+                <span style={{ display: "inline-block", marginTop: 4, padding: "2px 7px", borderRadius: 3, fontSize: 12, fontWeight: 600, background: tag.bg, color: tag.fg, whiteSpace: "nowrap" }}>{tag.t}</span>
+                {f.note && <div style={{ fontSize: 10, color: "#666", marginTop: 2 }}>{f.note}</div>}
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 18 }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#222" }}>{meta.jobType === "IT" ? "IT SQUARE ชั้น 3" : meta.jobType}<div style={{ fontSize: 13, fontWeight: 400, color: "#555" }}>{people.length} คน</div></div>
+          <div style={{ textAlign: "right", fontSize: 13, color: "#333" }}>
+            <div style={{ fontSize: 12, letterSpacing: 1, color: "#555" }}>ISSUE DATE</div>
+            <span style={{ display: "inline-block", background: "#ffe66d", padding: "2px 8px", borderRadius: 3, marginTop: 3, fontWeight: 600 }}>{dateEn}</span><br />
+            <span style={{ display: "inline-block", background: "#ffe66d", padding: "2px 8px", borderRadius: 3, marginTop: 3, fontWeight: 600 }}>{dateCn}</span>
+            <div style={{ marginTop: 4 }}>{collect.length ? `ต้องเก็บ ${collect.length} คน รวม ${sum.toLocaleString()} บาท` : "ไม่มีรายการเก็บเงิน"}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+function SummaryPhoto({ person: p }: { person: Person }) {
+  const blob = p.photo ?? p.files.find((x) => x.kind === "selfie")?.blob ?? p.files.find((x) => x.kind === "passport")?.blob ?? null;
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    if (!blob) { setUrl(""); return; }
+    const u = URL.createObjectURL(blob);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [blob]);
+  // eslint-disable-next-line @next/next/no-img-element
+  return url ? <img src={url} alt="" style={{ width: 90, height: 120, objectFit: "cover", borderRadius: 4, boxShadow: "0 1px 3px rgba(0,0,0,.25)" }} /> : <div style={{ width: 90, height: 120, background: "#eee", borderRadius: 4, margin: "0 auto" }} />;
 }
 
 function Thumb({ doc }: { doc: DocFile }) {

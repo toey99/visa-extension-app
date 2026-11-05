@@ -167,7 +167,7 @@ export async function mergePdfs(blobs: Blob[]): Promise<Blob> {
 
 const KIND_FILE: Record<string, string> = { passport: "passport", stamp: "stamp", selfie: "selfie", tm30: "tm30", other: "file" };
 
-export async function buildDayZip(people: Person[], meta: DayMeta): Promise<Blob> {
+export async function buildDayZip(people: Person[], meta: DayMeta, extras: { photoSheet?: Blob; summary?: Blob } = {}): Promise<Blob> {
   const JSZip = await getJSZip();
   const zip = new JSZip();
   const dayFolder = meta.date.replace(/\//g, "");
@@ -184,10 +184,13 @@ export async function buildDayZip(people: Person[], meta: DayMeta): Promise<Blob
       const ext = f.mime === "application/pdf" ? "pdf" : f.mime === "image/png" ? "png" : "jpg";
       dir.file(`${base}${suffix}.${ext}`, f.blob);
     }
+    if (p.photo) dir.file("photo-white.jpg", p.photo);
     if (p.tm7Pdf) {
       const nm = [p.fields.lastName, p.fields.firstName].filter(Boolean).join(" ").toUpperCase() || "form";
       dir.file(`TM7-${nm}.pdf`, p.tm7Pdf);
     }
   }
+  if (extras.photoSheet) root.file("photo-sheet.pdf", extras.photoSheet);
+  if (extras.summary) root.file("summary.png", extras.summary);
   return zip.generateAsync({ type: "blob", compression: "STORE" });
 }

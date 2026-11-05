@@ -12,6 +12,7 @@ export type DocFile = {
   blob: Blob;             // downscaled image, or the (possibly compressed) PDF
   status: "queued" | "analyzing" | "done" | "error";
   error?: string;
+  photoBox?: string;      // passport only: where the holder's photo is ("ymin,xmin,ymax,xmax" /1000)
 };
 
 export type PersonFields = {
@@ -52,6 +53,12 @@ export type Person = {
   fields: PersonFields;
   files: DocFile[];
   tm7Pdf?: Blob;                // generated TM.7 packet (with TM.30 appended)
+  aiPhoto?: Blob;               // studio-style output from the image model
+  photo?: Blob;                 // final framed 4×5.33 cm JPEG (600 dpi)
+  crop?: { zoom: number; dx: number; dy: number };
+  photoMode?: "selfie" | "passport";
+  cloth?: string;               // clothing used in passport mode
+  photoExtra?: string;          // per-person extra instruction for the image model
   createdAt: number;
 };
 
