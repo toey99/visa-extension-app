@@ -104,6 +104,7 @@ export async function analyzeTm30(formData: FormData): Promise<Tm30AnalyzeRespon
     return { ok: true, data };
   } catch (err) {
     console.error("[analyzeTm30] failed:", err);
-    return { ok: false, error: friendlyGeminiMessage(err, "TM.30") };
+    const detail = err instanceof Error ? err.message.slice(0, 160) : "";
+    return { ok: false, error: `${friendlyGeminiMessage(err, "TM.30")}${detail ? ` [${detail}]` : ""}` };
   }
 }

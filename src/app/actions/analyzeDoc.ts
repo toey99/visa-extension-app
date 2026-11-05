@@ -123,7 +123,6 @@ export async function analyzeDoc(formData: FormData): Promise<AnalyzeResponse> {
     const properties: Record<string, { type: Type; enum?: string[] }> = {};
     for (const f of FIELDS) properties[f] = { ...STRING };
     properties.docType = { type: Type.STRING, enum: ["passport", "stamp", "selfie", "tm30", "other"] };
-    properties.title = { type: Type.STRING, enum: ["MR.", "MRS.", "MISS", ""] };
 
     const request = {
       model: "gemini-2.5-flash",
@@ -163,9 +162,11 @@ export async function analyzeDoc(formData: FormData): Promise<AnalyzeResponse> {
       (data as unknown as Record<string, string>)[f] = typeof raw[f] === "string" ? (raw[f] as string) : "";
     }
     if (!["passport", "stamp", "selfie", "tm30", "other"].includes(data.docType)) data.docType = "other";
+    if (!["MR.", "MRS.", "MISS"].includes(data.title)) data.title = "";
     return { ok: true, data };
   } catch (err) {
     console.error("[analyzeDoc] failed:", err);
-    return { ok: false, error: friendlyGeminiMessage(err, "document") };
+    const detail = err instanceof Error ? err.message.slice(0, 160) : "";
+    return { ok: false, error: `${friendlyGeminiMessage(err, "document")}${detail ? ` [${detail}]` : ""}` };
   }
 }
