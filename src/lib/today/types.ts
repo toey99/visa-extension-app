@@ -59,6 +59,7 @@ export type Person = {
   photoMode?: "selfie" | "passport";
   cloth?: string;               // clothing used in passport mode
   photoExtra?: string;          // per-person extra instruction for the image model
+  collectImage?: Blob;          // passport page stamped with the amount to collect
   createdAt: number;
 };
 

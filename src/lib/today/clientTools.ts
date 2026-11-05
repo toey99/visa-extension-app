@@ -185,6 +185,7 @@ export async function buildDayZip(people: Person[], meta: DayMeta, extras: { pho
       dir.file(`${base}${suffix}.${ext}`, f.blob);
     }
     if (p.photo) dir.file("photo-white.jpg", p.photo);
+    if (p.collectImage) dir.file(`collect-${p.fields.amount || "0"}.jpg`, p.collectImage);
     if (p.tm7Pdf) {
       const nm = [p.fields.lastName, p.fields.firstName].filter(Boolean).join(" ").toUpperCase() || "form";
       dir.file(`TM7-${nm}.pdf`, p.tm7Pdf);
@@ -193,4 +194,63 @@ export async function buildDayZip(people: Person[], meta: DayMeta, extras: { pho
   if (extras.photoSheet) root.file("photo-sheet.pdf", extras.photoSheet);
   if (extras.summary) root.file("summary.png", extras.summary);
   return zip.generateAsync({ type: "blob", compression: "STORE" });
+}
+
+// ---------- "amount to collect" image: the passport page with the amount in big red digits ----------
+// Shown to the customer at the counter so the right person pays the right amount.
+
+export async function buildCollectImage(passport: Blob, amount: number, label = ""): Promise<Blob> {
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const u = URL.createObjectURL(passport);
+    const i = new Image();
+    i.onload = () => { URL.revokeObjectURL(u); resolve(i); };
+    i.onerror = () => { URL.revokeObjectURL(u); reject(new Error("image decode failed")); };
+    i.src = u;
+  });
+  const c = document.createElement("canvas");
+  c.width = img.width;
+  c.height = img.height;
+  const g = c.getContext("2d");
+  if (!g) throw new Error("no 2d context");
+  g.drawImage(img, 0, 0);
+  const text = amount.toLocaleString("en-US");
+  const size = Math.round(Math.min(c.width * 0.22, c.height * 0.16));
+  g.font = `bold ${size}px Arial, Helvetica, sans-serif`;
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.lineWidth = Math.max(4, size * 0.08);
+  g.strokeStyle = "rgba(255,255,255,0.9)";
+  g.fillStyle = "#e5102a";
+  const x = c.width / 2, y = c.height * 0.22;
+  g.strokeText(text, x, y);
+  g.fillText(text, x, y);
+  if (label) {
+    const ls = Math.round(size * 0.32);
+    g.font = `bold ${ls}px Arial, Helvetica, sans-serif`;
+    g.lineWidth = Math.max(2, ls * 0.1);
+    g.strokeText(label, x, y + size * 0.75);
+    g.fillText(label, x, y + size * 0.75);
+  }
+  return new Promise((resolve, reject) => c.toBlob((b) => (b ? resolve(b) : reject(new Error("toBlob failed"))), "image/jpeg", 0.9));
+}
+
+// ---------- hand-off to the ABC bill page (toey99.github.io/abc-bill) ----------
+
+export const BILL_URL = "https://toey99.github.io/abc-bill/";
+
+export function billUrl(people: Person[], amount: number, opts: { docType?: "cash_sale" | "invoice"; currency?: "THB" | "CNY"; service?: string } = {}): string {
+  const payload = {
+    docType: opts.docType ?? "cash_sale",
+    currency: opts.currency ?? "THB",
+    service: opts.service ?? "service_2",
+    amount: amount || "",
+    customers: people.slice(0, 5).map((p) => ({
+      en: [p.fields.firstName, p.fields.lastName].filter(Boolean).join(" "),
+      cn: p.fields.chineseName,
+      pp: p.fields.passportNo,
+    })),
+  };
+  const json = JSON.stringify(payload);
+  const b64 = btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return `${BILL_URL}?d=${b64}`;
 }

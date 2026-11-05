@@ -21,7 +21,7 @@ import {
 } from "@/lib/today/types";
 import { clearAll, deletePerson, loadAll, saveMeta, savePerson } from "@/lib/today/store";
 import {
-  buildDayZip, buildTm30Excel, downloadBlob, downscaleImage, loadScript, mergePdfs, plusDaysDdmmyyyy,
+  billUrl, buildCollectImage, buildDayZip, buildTm30Excel, downloadBlob, downscaleImage, loadScript, mergePdfs, plusDaysDdmmyyyy,
 } from "@/lib/today/clientTools";
 import {
   DEFAULT_CROP, buildPhotoSheetPdf, cropPassportPhoto, drawCrop, findHeadByBackground, loadImage, renderPhoto,
@@ -475,6 +475,29 @@ export default function TodayPage() {
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   }
 
+  // ---------- collect-amount image + bill ----------
+  async function collectOne(p: Person, download = true): Promise<Blob | null> {
+    const passport = p.files.find((x) => x.kind === "passport");
+    const amount = Number(p.fields.amount) || 0;
+    if (!passport) { setError(`${personFolderName(p)}: ไม่มีรูปพาสปอร์ต`); return null; }
+    if (!amount) { setError(`${personFolderName(p)}: ยังไม่ใส่ยอดเงิน`); return null; }
+    const blob = await buildCollectImage(passport.blob, amount, p.fields.agent ? p.fields.agent : "");
+    patchPerson(p.id, (x) => ({ ...x, collectImage: blob }));
+    if (download) downloadBlob(blob, `เก็บ-${amount}-${personFolderName(p)}.jpg`);
+    return blob;
+  }
+  async function collectAll() {
+    const todo = people.filter((p) => p.fields.pay === "collect" && Number(p.fields.amount) > 0 && p.files.some((x) => x.kind === "passport"));
+    if (!todo.length) { setError("ยังไม่มีคนที่ต้องเก็บเงิน + มียอด + มีพาสปอร์ต"); return; }
+    setError("");
+    for (const p of todo) await collectOne(p, true);
+    setStatus(`รูปเรียกเก็บ ${todo.length} รูป`);
+  }
+  function openBill(list: Person[]) {
+    const amount = list.length === 1 ? Number(list[0].fields.amount) || 0 : list.reduce((s, p) => s + (Number(p.fields.amount) || 0), 0);
+    window.open(billUrl(list, amount), "_blank");
+  }
+
   async function excelTm30() {
     const ready = people.filter((p) => p.fields.firstName && p.fields.passportNo);
     if (!ready.length) { setError("ยังไม่มีคนที่มีชื่อและเลขพาสปอร์ต"); return; }
@@ -567,6 +590,8 @@ export default function TodayPage() {
           <button onClick={photosAll} disabled={working || !people.length} className={btnPrimaryCls}>✦ ทำรูปพื้นขาวทุกคน</button>
           <button onClick={downloadPhotoSheet} disabled={working || !people.some((p) => p.photo)} className={btnCls}>⬇ แผ่น A4 รูป (PDF)</button>
           <button onClick={downloadSummary} disabled={working || !people.length} className={btnCls}>⬇ Summary (PNG)</button>
+          <button onClick={collectAll} disabled={working || !people.length} className={btnCls}>฿ รูปเรียกเก็บทุกคน</button>
+          <button onClick={() => openBill(people.filter((p) => p.fields.pay === "collect"))} disabled={!people.some((p) => p.fields.pay === "collect")} className={btnCls} title="บิลรวมคนที่ต้องเก็บเงิน (สูงสุด 5 คน)">🧾 บิลรวม</button>
           <button onClick={() => setShowSettings((v) => !v)} className={btnCls} title="ตั้งค่ารูป">⚙</button>
           <button onClick={dayZip} disabled={working || !people.length} className={btnCls}>⬇ โฟลเดอร์วันนี้ (zip)</button>
           <button onClick={clearDay} disabled={working} className={btnDangerCls}>ล้างวัน</button>
@@ -617,6 +642,8 @@ export default function TodayPage() {
             onRemove={() => removePerson(p.id)}
             onTm7={() => tm7One(p)}
             onPhoto={() => photoOne(p)}
+            onCollect={() => collectOne(p)}
+            onBill={() => openBill([p])}
             onCrop={(crop, photo) => updateCrop(p.id, crop, photo)}
             clothes={clothesList()}
             onMoveFile={(fileId, toId) => moveFile(p.id, fileId, toId)}
@@ -643,7 +670,7 @@ export default function TodayPage() {
 const KIND_LABEL: Record<DocType, string> = { passport: "พาสปอร์ต", stamp: "ตราเข้าเมือง", selfie: "เซลฟี่", tm30: "TM30", other: "อื่น ๆ" };
 
 function PersonCard({
-  person: p, people, meta, onChange, onRemove, onTm7, onPhoto, onCrop, clothes, onMoveFile, busy,
+  person: p, people, meta, onChange, onRemove, onTm7, onPhoto, onCollect, onBill, onCrop, clothes, onMoveFile, busy,
 }: {
   person: Person;
   people: Person[];
@@ -652,6 +679,8 @@ function PersonCard({
   onRemove: () => void;
   onTm7: () => void;
   onPhoto: () => void;
+  onCollect: () => void;
+  onBill: () => void;
   onCrop: (crop: Crop, photo: Blob) => void;
   clothes: string[];
   onMoveFile: (fileId: string, toPersonId: string) => void;
@@ -699,6 +728,8 @@ function PersonCard({
         <div className="flex flex-wrap gap-2">
           <button onClick={onTm7} disabled={busy} className={btnCls}>TM7 PDF</button>
           <button onClick={onPhoto} disabled={busy} className={btnCls}>{p.aiPhoto ? "ทำรูปใหม่" : "✦ ทำรูปพื้นขาว"}</button>
+          {f.pay === "collect" && <button onClick={onCollect} disabled={busy} className={btnCls} title="รูปพาสปอร์ตพร้อมยอดที่ต้องเก็บ">฿ รูปเรียกเก็บ</button>}
+          <button onClick={onBill} className={btnCls} title="เปิดโปรแกรมบิล ABC พร้อมชื่อ/พาสปอร์ต/ยอด">🧾 ออกบิล</button>
           <button onClick={() => { if (window.confirm("ลบคนนี้?")) onRemove(); }} className={btnDangerCls}>ลบ</button>
         </div>
       </div>
