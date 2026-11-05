@@ -137,6 +137,10 @@ export default function TodayPage() {
       } else {
         blob = await downscaleImage(f);
       }
+      // Copy the bytes into a plain Blob: a File stored in IndexedDB keeps
+      // pointing at the file on disk, and reading it later fails with
+      // NotReadableError once the OS handle is gone (e.g. after a reload).
+      blob = new Blob([await blob.arrayBuffer()], { type: isPdf ? "application/pdf" : "image/jpeg" });
       pending.push({
         doc: { id: newId(), kind: isPdf ? "tm30" : "other", name: f.name, mime: isPdf ? "application/pdf" : "image/jpeg", blob, status: "queued" },
         file: f,
