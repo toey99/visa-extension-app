@@ -30,6 +30,7 @@ export type AnalyzedDoc = {
   passportExpiryDate: string;   // DD/MM/YYYY
   passportIssuedAt: string;
   photoBox: string;             // holder's photo on the bio page: "ymin,xmin,ymax,xmax" on a 0-1000 scale
+  mrzLine1: string;             // first MRZ line (P<CCCSURNAME<<GIVEN<NAMES<<<...) transcribed exactly
   // entry stamp (latest Thai arrival stamp on the page)
   arrivalDate: string;          // DD/MM/YYYY — red date stamp inside the box
   admittedUntil: string;        // DD/MM/YYYY — blue "admitted until" date
@@ -83,6 +84,7 @@ PASSPORT:
 - "title": "MR." for male; "MRS." for a female (use "MISS" only if clearly unmarried); otherwise "".
 - "chineseName": the holder's name printed in Chinese characters (next to the Latin name on Chinese passports). "" if none.
 - Dates DD/MM/YYYY. "passportNo" is the document number on the bio page (top-right), not the MRZ personal number.
+- "mrzLine1": the FIRST line of the machine-readable zone at the bottom (44 characters, starts with "P<"), transcribed exactly with "<" fillers. The surname comes before "<<" and the given names after it — use this to decide which name is the surname.
 - "photoBox": bounding box of the holder's printed photo as "ymin,xmin,ymax,xmax" with each value 0-1000 relative to the image size.
 STAMP:
 - Find the MOST RECENT Thai ARRIVAL stamp (red rectangular box). "arrivalDate" = the date inside/under that box, DD/MM/YYYY (dates on stamps are usually DD MMM YYYY like "12 OCT 2026" — convert).
@@ -98,7 +100,7 @@ Return only the JSON object.`;
 const STRING = { type: Type.STRING };
 const FIELDS = [
   "docType", "title", "firstName", "lastName", "chineseName", "nationality", "dateOfBirth", "placeOfBirth",
-  "passportNo", "passportIssueDate", "passportExpiryDate", "passportIssuedAt", "photoBox",
+  "passportNo", "passportIssueDate", "passportExpiryDate", "passportIssuedAt", "photoBox", "mrzLine1",
   "arrivalDate", "admittedUntil", "portOfArrival", "arrivedBy", "visaType",
   "houseNo", "road", "subDistrict", "district", "province", "postalCode",
 ] as const;
@@ -165,6 +167,18 @@ export async function analyzeDoc(formData: FormData): Promise<AnalyzeResponse> {
     }
     if (!["passport", "stamp", "selfie", "tm30", "other"].includes(data.docType)) data.docType = "other";
     if (!["MR.", "MRS.", "MISS"].includes(data.title)) data.title = "";
+    // The MRZ is unambiguous about surname vs given names; the printed page is
+    // not always (LU LIANG vs LIANG LU). Prefer the MRZ when it parses.
+    const mrz = data.mrzLine1.toUpperCase().replace(/[^A-Z0-9<]/g, "");
+    if (/^P[A-Z<][A-Z<]{3}/.test(mrz) && mrz.length >= 20) {
+      const names = mrz.slice(5).split("<<");
+      const surname = names[0].replace(/</g, " ").trim();
+      const given = (names[1] ?? "").replace(/</g, " ").trim();
+      if (surname && given && /^[A-Z ]+$/.test(surname + given)) {
+        data.lastName = surname;
+        data.firstName = given;
+      }
+    }
     return { ok: true, data };
   } catch (err) {
     console.error("[analyzeDoc] failed:", err);
