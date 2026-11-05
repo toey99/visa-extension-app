@@ -19,6 +19,10 @@ export default function AuthHeader() {
             {user.email ?? user.name}
           </span>
         </div>
+        <nav className="flex items-center gap-2 text-xs">
+          <a href="/" className="rounded-lg px-2 py-1 font-medium text-slate-600 hover:bg-slate-50">ฟอร์มทีละคน</a>
+          <a href="/today" className="rounded-lg px-2 py-1 font-medium text-indigo-700 hover:bg-indigo-50">งานวันนี้</a>
+        </nav>
         <button
           type="button"
           onClick={() => signOut({ callbackUrl: "/" })}
